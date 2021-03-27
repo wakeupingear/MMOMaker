@@ -1,0 +1,29 @@
+{
+  "name": "mmoengine",
+  "version": "1.0.0",
+  "description": "GMS2.3 MMO framework",
+  "main": "server.js",
+  "dependencies": {
+    "firebase-admin": "^9.5.0",
+    "http": "^0.0.1-security",
+    "net": "^1.0.2",
+    "nodemailer": "^6.5.0",
+    "uuid": "^8.3.2",
+    "ws": "^7.4.4"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/willf668/MMOEngine.git"
+  },
+  "author": "Will Farhat",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/willf668/MMOEngine/issues"
+  },
+  "homepage": "https://github.com/willf668/MMOEngine#readme"
+}
