@@ -3,7 +3,7 @@ const serverNet = Object.freeze(
 		"assign": 0,
 		"message": 1,
 		"miscData": 2,
-		"plyLeave": 3,
+		"leave": 3,
 
 		"pos": 4,
 		"room": 5,
@@ -21,7 +21,6 @@ const clientNet = Object.freeze(
 		"name": 8,
 
 		"message": 0,
-		"leave": 2,
 		"email": 3,
 		"upload": 4,
 		"miscData": 1,
@@ -38,25 +37,35 @@ const WebSocket = require('ws');
 const nodemailer = require('nodemailer');
 
 //firebase setup
-const fbAuth = "./tinyheadedgame-firebase-adminsdk-xrz8t-d167d1065d.json";
-const fbURL = "https://tinyheadedgame.firebaseio.com";
-var admin = require("firebase-admin");
-var serviceAccount = require(fbAuth);
-admin.initializeApp({
-	credential: admin.credential.cert(serviceAccount),
-	databaseURL: fbURL
-});
-var db = admin.database();
-var ref = db.ref();
+const fbPath = "./exampleProject-firebase-adminsdk-blah-blahblahblah.json";
+try {
+	let admin = require("firebase-admin");
+	let serviceAccount = require(fbPath);
+	const fbURL = "https://exampleProject.firebaseio.com";
+	admin.initializeApp({
+		credential: admin.credential.cert(serviceAccount),
+		databaseURL: fbURL
+	});
+	const db = admin.database();
+	const ref = db.ref();
+}
+catch (e) {
+	console.log("Firebase auth is not configured");
+}
 
 //nodemailer setup
-const transporter = nodemailer.createTransport({
-	service: 'gmail',
-	auth: {
-		user: 'username',
-		pass: 'password'
-	}
-});
+try {
+	const transporter = nodemailer.createTransport({
+		service: 'gmail',
+		auth: {
+			user: 'username',
+			pass: 'password'
+		}
+	});
+}
+catch(e){
+	console.log("Nodemailer is not configured")
+}
 
 //normal webserver setup
 http.createServer(function (req, res) {
@@ -67,7 +76,7 @@ http.createServer(function (req, res) {
 
 //initialize variables
 const socketList = [];
-const socketToOutfit = new Map(), socketToName = new Map(), socketToRoom = new Map(), socketToPos = new Map();
+const socketToOutfit = {}, socketToName = {}, socketToRoom = {}, socketToPos = {};
 const serverIndex = 0;
 const buf = Buffer.alloc(512);
 const userData = ["email", "northGem", "westGem", "southGem", "numGems", "playerName", "gameFinished"];
@@ -127,8 +136,7 @@ function serverCode(socket, isWS, addr, parentServer) {
 				socketToOutfit[socket.uid] = "0242312170110255000000000000255";
 				socketToRoom[socket.uid] = "standby";
 				socketToPos[socket.uid] = ["0", "0"];
-				for (let i = 0; i < socketList.length; i++) { //send info about all currently connected players
-					const _sock = socketList[i];
+				socketList.forEach(_sock => {
 					if (_sock.id != socket.id) {
 						sendPlayerData(serverNet.pos, "0:0?1", socket.id, _sock);
 
@@ -137,7 +145,7 @@ function serverCode(socket, isWS, addr, parentServer) {
 						sendPlayerData(serverNet.room, socketToRoom[_sock.uid], _sock.id, socket);
 						sendPlayerData(serverNet.pos, socketToPos[_sock.uid][0] + ":" + socketToPos[_sock.uid][1] + "?1", _sock.id, socket);
 					}
-				}
+				});
 				break;
 
 			case clientNet.pos:
@@ -156,14 +164,30 @@ function serverCode(socket, isWS, addr, parentServer) {
 					if (_sock.id != socket.id) sendPlayerData(data.readUInt8(0), _data, socket.id, _sock);
 				});
 				break;
-			
+
 			case clientNet.message:
+				var _text = data.toString("utf-8", 1);
+				socketList.forEach(_sock => {
+					if (_sock.id != socket.id) {
+						buf.fill(0);
+						buf.writeUInt8(serverNet.message, 0);
+						buf.write(_text, 1);
+						writeToSocket(_sock, buf);
+					}
+				});
 				break;
 
 			case clientNet.leave:
 				break;
 
 			case clientNet.email:
+				var _text = data.toString("utf-8", 1);
+				var mailOptions = {
+					from: 'exampleSender@gmail.com',
+					to: 'helpDesk@gmail.com',
+					subject: 'Bug Report - Player ' + socketToName[socket.id] + " #" + socket.uid,
+					text: 'Bug report:\n\n' + _text
+				};
 				break;
 
 			case clientNet.upload:
@@ -241,14 +265,12 @@ function playerDisconnect(socket) {
 	var _ind = socketList.indexOf(socket);
 	if (_ind > -1) delete socketList[_ind]; //for (i=0;i<3;i++) delete socketList[_ind+i];
 	socketList = removeEmpty(socketList);
-
-	for (let i = 0; i < socketList.length; i++) {
-		var _sock = socketList[i];
+	socketList.forEach(_sock => {
 		buf.fill(0);
-		buf.writeUInt8(network.playerLeave, 0);
+		buf.writeUInt8(serverNet.leave, 0);
 		buf.writeUInt16LE(socket.id, 1);
 		writeToSocket(_sock, buf);
-	}
+	});
 
 	socketToName.delete(socket.uid);
 	socketToOutfit.delete(socket.uid);
@@ -264,12 +286,10 @@ function removeEmpty(_list) {
 }
 
 function sendPlayerData(_type, _data, _fromSocket, _toSocket) {//sends player data
-
 	buf.fill(0);
-	buf.writeUInt8(network.playerData, 0);
+	buf.writeUInt8(_type, 0);
 	buf.writeUInt16LE(_fromSocket, 1);
-	buf.writeUInt8(_type, 3);
-	buf.write(_data, 4);
+	buf.write(_data, 3);
 	writeToSocket(_toSocket, buf);
 }
 
