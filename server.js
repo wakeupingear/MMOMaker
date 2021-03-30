@@ -1,4 +1,10 @@
-const serverNet = Object.freeze(
+//Server NodeJS script for hosting an isolated game server
+//To test, install NodeJS and run 'node server.js'
+
+//This script can also be directly uploaded to a Node equipped server for easy deployment!
+//Make sure to include the package.json and package-lock.json files
+
+const serverNet = Object.freeze( //Enum for server command
 	{
 		"assign": 0,
 		"message": 1,
@@ -161,8 +167,8 @@ function serverCode(socket, isWS, addr, parentServer) {
 				if (data.readUInt8(0) == clientNet.room) socketToRoom[socket.uid] = _data;
 				else if (data.readUInt8(0) == clientNet.name) socketToName[socket.uid] = _data;
 				else if (data.readUInt8(0) == clientNet.pos) {
-					socketToPos[socket.uid] = _data.substring(0, 7);
-					socketToY[socket.uid] = _data.substring(8, 15);
+					socketToPos[socket.uid][0] = _data.substring(0, 7);
+					socketToPos[socket.uid][1] = _data.substring(8, 15);
 				}
 				else if (data.readUInt8(0) == clientNet.outfit) socketToOutfit[socket.uid] = _data;
 				socketList.forEach(_sock => {
@@ -193,13 +199,21 @@ function serverCode(socket, isWS, addr, parentServer) {
 					subject: 'Bug Report - Player ' + socketToName[socket.id] + " #" + socket.uid,
 					text: 'Bug report:\n\n' + _text
 				};
+
+				transporter.sendMail(mailOptions, function (error, info) {
+					if (error) {
+						console.log(error);
+					} else {
+						console.log('Email sent: ' + info.response);
+					}
+				});
 				break;
 
 			case clientNet.upload:
 				break;
 
 			case clientNet.miscData: //event data send by player
-				var _data=JSON.parse(readBufString(data,1));
+				var _data = JSON.parse(readBufString(data, 1));
 				break;
 
 			default: break;
