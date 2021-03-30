@@ -8,22 +8,24 @@ const serverNet = Object.freeze(
 		"pos": 4,
 		"room": 5,
 		"outfit": 6,
-		"name": 7
+		"name": 7,
+
+		"connect": 8
 	});
 
 const clientNet = Object.freeze(
 	{
-		"ID": 9,
+		"ID": 1,
 
-		"pos": 5,
-		"room": 6,
-		"outfit": 7,
-		"name": 8,
+		"pos": 2,
+		"room": 3,
+		"outfit": 4,
+		"name": 5,
 
-		"message": 0,
-		"email": 3,
-		"upload": 4,
-		"miscData": 1,
+		"message": 6,
+		"email": 7,
+		"upload": 8,
+		"miscData": 9
 	});
 
 const serverNodes = ["Mango", "Strawberry", "Blueberry", "Banana", "Dragonfruit", "Raspberry", "Apple", "Pineapple", "Moonberry", "Jerry"];
@@ -63,7 +65,7 @@ try {
 		}
 	});
 }
-catch(e){
+catch (e) {
 	console.log("Nodemailer is not configured")
 }
 
@@ -75,9 +77,9 @@ http.createServer(function (req, res) {
 }).listen(8080);
 
 //initialize variables
-const socketList = [];
-const socketToOutfit = {}, socketToName = {}, socketToRoom = {}, socketToPos = {};
-const serverIndex = 0;
+let socketList = [];
+let socketToOutfit = {}, socketToName = {}, socketToRoom = {}, socketToPos = {};
+let serverIndex = 0;
 const buf = Buffer.alloc(512);
 const userData = ["email", "northGem", "westGem", "southGem", "numGems", "playerName", "gameFinished"];
 
@@ -103,8 +105,11 @@ function createServer(parentServer) {
 		socket.on("error", function (err) {//player disconnects
 			playerDisconnect(socket);
 		});
+		socket.on("close", function (err) {//player disconnects
+			playerDisconnect(socket);
+		});
 	});
-	server.listen(TCPPort, function () {
+	tcpServer.listen(TCPPort, function () {
 		console.log("The Server has Started");
 	});
 }
@@ -122,16 +127,16 @@ function serverCode(socket, isWS, addr, parentServer) {
 	buf.fill(0);
 	buf.writeUInt8(serverNet.assign, 0);
 	buf.writeUInt16LE(socket.id, 1);
-	buf.writeUInt8(playerCount, 3);
-	buf.write(socket.uid, 4);
+	buf.write(socket.uid, 3);
 	writeToSocket(socket, buf);
 
-	if (!isWS) const _dataName = "data";
-	else const _dataName = "message";
+	let _dataName = "data";
+	if (isWS) _dataName = "message";
 	socket.on(_dataName, function (data)//recieving data from the player
 	{
 		switch (data.readUInt8(0)) {
 			case clientNet.ID:
+				socket.uid = readBufString(data, 1);
 				socketToName[socket.uid] = "Joe";
 				socketToOutfit[socket.uid] = "0242312170110255000000000000255";
 				socketToRoom[socket.uid] = "standby";
@@ -152,7 +157,7 @@ function serverCode(socket, isWS, addr, parentServer) {
 			case clientNet.room:
 			case clientNet.outfit:
 			case clientNet.name:
-				var _data = data.toString("utf-8", 1).replace(/\0/g, '').replace("\u0005", "");
+				var _data = readBufString(data, 1);
 				if (data.readUInt8(0) == clientNet.room) socketToRoom[socket.uid] = _data;
 				else if (data.readUInt8(0) == clientNet.name) socketToName[socket.uid] = _data;
 				else if (data.readUInt8(0) == clientNet.pos) {
@@ -181,7 +186,7 @@ function serverCode(socket, isWS, addr, parentServer) {
 				break;
 
 			case clientNet.email:
-				var _text = data.toString("utf-8", 1);
+				var _text = readBufString(data, 1);
 				var mailOptions = {
 					from: 'exampleSender@gmail.com',
 					to: 'helpDesk@gmail.com',
@@ -194,6 +199,7 @@ function serverCode(socket, isWS, addr, parentServer) {
 				break;
 
 			case clientNet.miscData: //event data send by player
+				var _data=JSON.parse(readBufString(data,1));
 				break;
 
 			default: break;
@@ -272,10 +278,10 @@ function playerDisconnect(socket) {
 		writeToSocket(_sock, buf);
 	});
 
-	socketToName.delete(socket.uid);
-	socketToOutfit.delete(socket.uid);
-	socketToRoom.delete(socket.uid);
-	socketToPos.delete(socket.uid);
+	delete socketToName[socket.uid];
+	delete socketToOutfit[socket.uid];
+	delete socketToRoom[socket.uid];
+	delete socketToPos[socket.uid];
 	console.log("Remaining Players: " + socketList.length);
 }
 
@@ -298,4 +304,8 @@ function sendPlayerCount() { //sends player count to the manager
 	var len = buf.writeUInt8(network.sendPlayerCount, 0);
 	len += buf.writeUInt8(socketList.length, len);
 	serverSocket.write(buf);
+}
+
+function readBufString(str, ind) {
+	return str.toString("utf-8", ind).replace(/\0/g, '').replace("\u0005", "");
 }
