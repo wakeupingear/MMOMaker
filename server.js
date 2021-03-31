@@ -37,11 +37,10 @@ const serverNodes = ["Mango", "Strawberry", "Blueberry", "Banana", "Dragonfruit"
 let playerCount = 0; //Number of connected players
 
 //NPM Imports
-const { v4: uuidv4 } = require('uuid');
 const net = require("net");
 const http = require("http");
 const WebSocket = require('ws');
-const nodemailer = require('nodemailer');
+const { v4: uuidv4 } = require('uuid');
 
 //OPTIONAL - Firebase Realtime Database connection
 const fbPath = "./exampleProject-firebase-adminsdk-blah-blahblahblah.json"; //Path to Firebase auth key
@@ -62,6 +61,7 @@ catch (e) {
 
 //OPTIONAL - Email support
 try {
+	const nodemailer = require('nodemailer');
 	const transporter = nodemailer.createTransport({
 		service: 'gmail', //Email provider
 		auth: {
@@ -224,7 +224,8 @@ function serverCode(socket, isWS, addr, parentServer) {
 const ipToConnect = "-1";
 if (ipToConnect != "-1") {
 	const serverSocket = new net.Socket();
-	serverSocket.connect(63458, ipToConnect, function (socket) { //Connect to parent server
+	const serverPort = 63459;
+	serverSocket.connect(serverPort, ipToConnect, function (socket) { //Connect to parent server
 		console.log("Connected to ServerManager " + ipToConnect);
 
 		createServer(socket); //Create the server, passing the parent server as an argument in case it needs to be referenced

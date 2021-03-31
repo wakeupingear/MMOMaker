@@ -42,8 +42,10 @@ function scrMMOSetup(network_type){
 	scrMMOLoad();
 }
 
-function scrMMOConnect(addr,port){
-	network_connect_raw(global.MMO_Socket,addr,port);
+function scrMMOConnect(ipOPTIONAL,portOPTIONAL){
+	if is_undefined(ipOPTIONAL) ipOPTIONAL=global.MMO_IP;
+	if is_undefined(portOPTIONAL) portOPTIONAL=global.MMO_Port;
+	else network_connect_raw(global.MMO_Socket,ipOPTIONAL,portOPTIONAL);
 }
 
 function scrMMOSave(){
