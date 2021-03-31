@@ -26,7 +26,7 @@ function scrMMOSetup(network_type){
 	global.MMO_IP="127.0.0.1";
 	global.MMO_Port=63457;
 
-	global.MMO_Buf=buffer_create(16384,buffer_fixed,1);
+	global.MMO_Buf=buffer_create(4096,buffer_fixed,1);
 	global.MMO_Socket=network_create_socket(network_type);
 	if network_type!=network_socket_ws network_set_timeout(global.MMO_Socket,4000,4000);
 	global.MMO_Type=network_type;

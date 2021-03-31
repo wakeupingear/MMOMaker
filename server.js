@@ -4,22 +4,19 @@
 //This script can also be directly uploaded to a Node equipped server for easy deployment!
 //Make sure to include the package.json and package-lock.json files
 
-const serverNet = Object.freeze( //Enum for server command
+const serverNet = Object.freeze( //Enum for server-to-client packets
 	{
 		"assign": 0,
 		"message": 1,
 		"miscData": 2,
-		"leave": 3,
-
-		"pos": 4,
-		"room": 5,
-		"outfit": 6,
-		"name": 7,
-
+		"pos": 3,
+		"room": 4,
+		"outfit": 5,
+		"name": 6,
 		"connect": 8
 	});
 
-const clientNet = Object.freeze(
+const clientNet = Object.freeze( //Enum for client-to-server packets
 	{
 		"ID": 1,
 
@@ -34,22 +31,24 @@ const clientNet = Object.freeze(
 		"miscData": 9
 	});
 
+//Server index. Default is 0, only changes
 const serverNodes = ["Mango", "Strawberry", "Blueberry", "Banana", "Dragonfruit", "Raspberry", "Apple", "Pineapple", "Moonberry", "Jerry"];
-let playerCount = 0;
 
-//npm
+let playerCount = 0; //Number of connected players
+
+//NPM Imports
 const { v4: uuidv4 } = require('uuid');
 const net = require("net");
 const http = require("http");
 const WebSocket = require('ws');
 const nodemailer = require('nodemailer');
 
-//firebase setup
-const fbPath = "./exampleProject-firebase-adminsdk-blah-blahblahblah.json";
+//OPTIONAL - Firebase Realtime Database connection
+const fbPath = "./exampleProject-firebase-adminsdk-blah-blahblahblah.json"; //Path to Firebase auth key
 try {
 	let admin = require("firebase-admin");
 	let serviceAccount = require(fbPath);
-	const fbURL = "https://exampleProject.firebaseio.com";
+	const fbURL = "https://exampleProject.firebaseio.com"; //Database URL
 	admin.initializeApp({
 		credential: admin.credential.cert(serviceAccount),
 		databaseURL: fbURL
@@ -61,13 +60,13 @@ catch (e) {
 	console.log("Firebase auth is not configured");
 }
 
-//nodemailer setup
+//OPTIONAL - Email support
 try {
 	const transporter = nodemailer.createTransport({
-		service: 'gmail',
+		service: 'gmail', //Email provider
 		auth: {
-			user: 'username',
-			pass: 'password'
+			user: 'username', //Account username
+			pass: 'password' //Account password
 		}
 	});
 }
@@ -75,132 +74,130 @@ catch (e) {
 	console.log("Nodemailer is not configured")
 }
 
-//normal webserver setup
+//Default webserver setup for handling HTTP requests to the server
+//Necessary for AWS Elastic Beanstlak to pass health checks
 http.createServer(function (req, res) {
 	res.writeHead(200, { 'Content-Type': 'text/plain' });
 	res.write('Ok');
 	res.end();
 }).listen(8080);
 
-//initialize variables
-let socketList = [];
-let socketToOutfit = {}, socketToName = {}, socketToRoom = {}, socketToPos = {};
-let serverIndex = 0;
-const buf = Buffer.alloc(512);
-const userData = ["email", "northGem", "westGem", "southGem", "numGems", "playerName", "gameFinished"];
 
+let socketList = []; //Array holding all client Sockets
+let socketToOutfit = {}, socketToName = {}, socketToRoom = {}, socketToPos = {}; //Objects mapping Socket IDs to data
+const buf = Buffer.alloc(512); //Standard data buffer
+const bufLarge = Buffer.alloc(4096); //Large data buffer for JSON data
+let serverIndex = 0; //Server index within a larger cluster
+
+//Function for initializing server
 function createServer(parentServer) {
 	//Create WS server
-	const wsPort = 63456;
+	const wsPort = 63456; //WS Port
 	const wsServer = new WebSocket.Server({ port: wsPort });
-	wsServer.on('connection', function (ws, req) {
+	wsServer.on('connection', function (ws, req) { //Player connects
 		serverCode(ws, true, req.socket.remoteAddress.substring(7, req.socket.remoteAddress.length), parentServer);
 
-		ws.on('close', function close() {
+		ws.on('close', function close() { //Disconnect
 			playerDisconnect(ws);
 		});
 	});
 
 	//Create TCP server
-	const TCPPort = 63457;
+	const TCPPort = 63457; //TCP Port
 	const tcpServer = net.createServer()
-	tcpServer.on("connection", function (socket)//player connects
+	tcpServer.on("connection", function (socket) //Player connects
 	{
 		serverCode(socket, false, socket.remoteAddress.substring(7, socket.remoteAddress.length), parentServer);
 
-		socket.on("error", function (err) {//player disconnects
+		socket.on("error", function (err) { //Disconnect due to error
 			playerDisconnect(socket);
 		});
-		socket.on("close", function (err) {//player disconnects
+		socket.on("close", function (err) { //Disconnect
 			playerDisconnect(socket);
 		});
 	});
-	tcpServer.listen(TCPPort, function () {
+	tcpServer.listen(TCPPort, function () { //Start TCP server
 		console.log("The Server has Started");
 	});
 }
 
 //Player connection code
 function serverCode(socket, isWS, addr, parentServer) {
-	const strID = uuidv4();
-	socket.uid = strID;
-	socket.id = playerCount;
-	playerCount = (playerCount++ % 65636);
-	socketList.push(socket);
+	const strID = uuidv4(); //Generate unique UID
+	socket.uid = strID; //Asign UID to socket variable
+	socket.id = playerCount; //Assign sequential ID (16bits) for packet identification
+	playerCount = (playerCount++ % 65636); //Iterate ID
+	socketList.push(socket); //Add socket to the list
 	console.log("New player: " + addr);
 	console.log("Current number of Players: " + socketList.length);
 
-	buf.fill(0);
-	buf.writeUInt8(serverNet.assign, 0);
-	buf.writeUInt16LE(socket.id, 1);
-	buf.write(socket.uid, 3);
-	writeToSocket(socket, buf);
+	buf.fill(0); //Reset a buffer before sending it
+	buf.writeUInt8(serverNet.assign, 0); //Packet header
+	buf.writeUInt16LE(socket.id, 1); //Write ID to buffer
+	buf.write(socket.uid, 3); //Write UID to buffer
+	writeToSocket(socket, buf); //Send buffer
 
-	let _dataName = "data";
+	let _dataName = "data"; //set data type (different between WS and TCP)
 	if (isWS) _dataName = "message";
-	socket.on(_dataName, function (data)//recieving data from the player
+	socket.on(_dataName, function (data) //Recieving data from the player
 	{
-		switch (data.readUInt8(0)) {
-			case clientNet.ID:
-				socket.uid = readBufString(data, 1);
-				socketToName[socket.uid] = "Joe";
+		switch (data.readUInt8(0)) { //Check possible headers
+			case clientNet.ID: //Confirming UID
+				socket.uid = readBufString(data, 1); //Sanitize buffer string (remove hidden characters/GMS packet identifiers)
+				socketToName[socket.uid] = "Joe"; //Set initial client entries
 				socketToOutfit[socket.uid] = "0242312170110255000000000000255";
 				socketToRoom[socket.uid] = "standby";
 				socketToPos[socket.uid] = ["0", "0"];
-				socketList.forEach(_sock => {
+				socketList.forEach(_sock => { //Send new player to all other players
 					if (_sock.id != socket.id) {
-						sendPlayerData(serverNet.pos, "0:0?1", socket.id, _sock);
-
-						sendPlayerData(serverNet.name, socketToName[_sock.uid], _sock.id, socket);//send other player to this player
-						sendPlayerData(serverNet.outfit, socketToOutfit[_sock.uid], _sock.id, socket);
-						sendPlayerData(serverNet.room, socketToRoom[_sock.uid], _sock.id, socket);
-						sendPlayerData(serverNet.pos, socketToPos[_sock.uid][0] + ":" + socketToPos[_sock.uid][1] + "?1", _sock.id, socket);
+						sendPlayerData(serverNet.pos, "0:0?1", socket.id, _sock); //Send position
+						sendPlayerData(serverNet.name, socketToName[_sock.uid], _sock.id, socket); //Send name
+						sendPlayerData(serverNet.outfit, socketToOutfit[_sock.uid], _sock.id, socket); //Send outfit
+						sendPlayerData(serverNet.room, socketToRoom[_sock.uid], _sock.id, socket); //Send room
 					}
 				});
 				break;
 
-			case clientNet.pos:
+			case clientNet.pos: //Recieving new player data
 			case clientNet.room:
 			case clientNet.outfit:
 			case clientNet.name:
 				var _data = readBufString(data, 1);
-				if (data.readUInt8(0) == clientNet.room) socketToRoom[socket.uid] = _data;
-				else if (data.readUInt8(0) == clientNet.name) socketToName[socket.uid] = _data;
-				else if (data.readUInt8(0) == clientNet.pos) {
+				if (data.readUInt8(0) == clientNet.room) socketToRoom[socket.uid] = _data; //Update room
+				else if (data.readUInt8(0) == clientNet.name) socketToName[socket.uid] = _data; //Update name
+				else if (data.readUInt8(0) == clientNet.pos) { //Update position
 					socketToPos[socket.uid][0] = _data.substring(0, 7);
 					socketToPos[socket.uid][1] = _data.substring(8, 15);
 				}
-				else if (data.readUInt8(0) == clientNet.outfit) socketToOutfit[socket.uid] = _data;
-				socketList.forEach(_sock => {
+				else if (data.readUInt8(0) == clientNet.outfit) socketToOutfit[socket.uid] = _data; //Update outfit
+				socketList.forEach(_sock => { //Send update to other players
 					if (_sock.id != socket.id) sendPlayerData(data.readUInt8(0), _data, socket.id, _sock);
 				});
 				break;
 
-			case clientNet.message:
-				var _text = data.toString("utf-8", 1);
+			case clientNet.message: //Recieving chat message
+				const _text = readBufString(data, 1);
 				socketList.forEach(_sock => {
 					if (_sock.id != socket.id) {
 						buf.fill(0);
-						buf.writeUInt8(serverNet.message, 0);
-						buf.write(_text, 1);
+						buf.writeUInt8(serverNet.message, 0); //Message header
+						buf.write(_text, 1); //Message contents
 						writeToSocket(_sock, buf);
 					}
 				});
 				break;
 
-			case clientNet.leave:
-				break;
-
-			case clientNet.email:
-				var _text = readBufString(data, 1);
-				var mailOptions = {
+			case clientNet.email: //Sending email (useful for bug reports, logging data, etc)
+				const _text = readBufString(data, 1);
+				var mailOptions = { //Nodemailer object
 					from: 'exampleSender@gmail.com',
 					to: 'helpDesk@gmail.com',
+					//cc: 'otherPerson@gmail.com',
 					subject: 'Bug Report - Player ' + socketToName[socket.id] + " #" + socket.uid,
 					text: 'Bug report:\n\n' + _text
 				};
 
-				transporter.sendMail(mailOptions, function (error, info) {
+				transporter.sendMail(mailOptions, function (error, info) { //Send email asyncronously
 					if (error) {
 						console.log(error);
 					} else {
@@ -209,7 +206,7 @@ function serverCode(socket, isWS, addr, parentServer) {
 				});
 				break;
 
-			case clientNet.upload:
+			case clientNet.upload: //Upload data to Firebase
 				break;
 
 			case clientNet.miscData: //event data send by player
@@ -223,53 +220,30 @@ function serverCode(socket, isWS, addr, parentServer) {
 
 
 //OPTIONAL - connect this server to a parent server
-//Useful if this server needs to get data from another server
+//Useful if this server needs to get data from another server or for loadbalancing traffic across a cluster of nodes
 const ipToConnect = "-1";
 if (ipToConnect != "-1") {
 	const serverSocket = new net.Socket();
-	serverSocket.connect(63458, ipToConnect, function (socket) { //connect to server manager
+	serverSocket.connect(63458, ipToConnect, function (socket) { //Connect to parent server
 		console.log("Connected to ServerManager " + ipToConnect);
 
-		createServer(socket);
+		createServer(socket); //Create the server, passing the parent server as an argument in case it needs to be referenced
 
-		serverSocket.on("data", function (data)//recieving data from the server
+		serverSocket.on("data", function (data)//Recieving data from the server
 		{
 			switch (data.readUInt8(0)) {
-				case network.assignServer://send number of players
-					console.log("sending player count...");
-					sendPlayerCount();
-					break;
-
-				case network.miscData:
-					var _type = data.readUInt8(1);
-					if (_type == 0) { //forgot what this does lmao
-						var _sock = data.readUInt8(2);
-						var _num = data.toString('ascii', 3);
-						if (socketToID[_sock] != null) {
-							buf.fill(0);
-							var len = buf.writeUInt8(network.miscData, 0);
-							len += buf.writeUInt8(2, len);
-							len += buf.write(_num, len);
-							serverSocket.write(buf);
-							socketToID[_sock] = parseInt(_num);
-						}
-					}
-					else if (_type == 1) {
-						serverIndex = serverNodes[data.readUInt8(2)];
-					}
-					break;
-
+				//Packets from the parent server can be recieved here
 				default: break;
 			}
 		});
 	});
 }
-else createServer(-1);
+else createServer(-1); //Create the server, passing -1 since there is no parent server
 
 
 
-//misc functions
-function writeToSocket(socket, dataBuf) {
+//Helper functions
+function writeToSocket(socket, dataBuf) { //Send a buffer to a socket - necessary since WS and TCP use different syntax
 	try {
 		if (!socket.isWS) {
 			socket.write(dataBuf);
@@ -277,15 +251,15 @@ function writeToSocket(socket, dataBuf) {
 		else socket.send(dataBuf);
 	}
 	catch (err) {
-		console.log("sending error: " + err);
+		console.log("Sending error: " + err);
 	}
 }
 
-function playerDisconnect(socket) {
+function playerDisconnect(socket) { //Player disconnects
 	var _ind = socketList.indexOf(socket);
-	if (_ind > -1) delete socketList[_ind]; //for (i=0;i<3;i++) delete socketList[_ind+i];
+	if (_ind > -1) delete socketList[_ind];
 	socketList = removeEmpty(socketList);
-	socketList.forEach(_sock => {
+	socketList.forEach(_sock => { //Send the disconnect to every other player
 		buf.fill(0);
 		buf.writeUInt8(serverNet.leave, 0);
 		buf.writeUInt16LE(socket.id, 1);
@@ -299,13 +273,13 @@ function playerDisconnect(socket) {
 	console.log("Remaining Players: " + socketList.length);
 }
 
-function removeEmpty(_list) {
+function removeEmpty(_list) { //Remove empty null items from an array
 	return _list.filter(function (el) {
 		return el != null;
 	});
 }
 
-function sendPlayerData(_type, _data, _fromSocket, _toSocket) {//sends player data
+function sendPlayerData(_type, _data, _fromSocket, _toSocket) {//Send player data from one socket to another socket
 	buf.fill(0);
 	buf.writeUInt8(_type, 0);
 	buf.writeUInt16LE(_fromSocket, 1);
@@ -313,13 +287,6 @@ function sendPlayerData(_type, _data, _fromSocket, _toSocket) {//sends player da
 	writeToSocket(_toSocket, buf);
 }
 
-function sendPlayerCount() { //sends player count to the manager
-	buf.fill(0);
-	var len = buf.writeUInt8(network.sendPlayerCount, 0);
-	len += buf.writeUInt8(socketList.length, len);
-	serverSocket.write(buf);
-}
-
-function readBufString(str, ind) {
+function readBufString(str, ind) { //Sanitize a string to remove GMS headers and characters
 	return str.toString("utf-8", ind).replace(/\0/g, '').replace("\u0005", "");
 }
