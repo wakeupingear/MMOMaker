@@ -13,27 +13,36 @@ const serverNet = Object.freeze( //Enum for server-to-client packets
 		"room": 4,
 		"outfit": 5,
 		"name": 6,
-		"connect": 8
+		"connect": 7,
+		"leave": 8
 	});
 
 const clientNet = Object.freeze( //Enum for client-to-server packets
 	{
-		"ID": 1,
+		"ID": 9,
 
-		"pos": 2,
-		"room": 3,
-		"outfit": 4,
-		"name": 5,
+		"pos": 10,
+		"room": 11,
+		"outfit": 12,
+		"name": 13,
 
-		"message": 6,
-		"email": 7,
-		"upload": 8,
-		"miscData": 9
+		"message": 14,
+		"email": 15,
+		"upload": 16,
+		"miscData": 17
 	});
 
-//Server index. Default is 0, only changes
-const serverNodes = ["Mango", "Strawberry", "Blueberry", "Banana", "Dragonfruit", "Raspberry", "Apple", "Pineapple", "Moonberry", "Jerry"];
+const clusterNet = Object.freeze( //Enum for cluster packets
+	{
+		"count": 18,
+		"playerData": 19,
+		"miscData": 20,
+		"type": 21,
+		"serverData": 22
+	});
 
+
+let serverIndex = 0; //Server index within a larger cluster
 let playerCount = 0; //Number of connected players
 
 //NPM Imports
@@ -83,11 +92,10 @@ http.createServer(function (req, res) {
 }).listen(8080);
 
 
-let socketList = []; //Array holding all client Sockets
+let idToSocket = {}; //Object mapping numeric ID to a socket.
 let socketToOutfit = {}, socketToName = {}, socketToRoom = {}, socketToPos = {}; //Objects mapping Socket IDs to data
 const buf = Buffer.alloc(512); //Standard data buffer
 const bufLarge = Buffer.alloc(4096); //Large data buffer for JSON data
-let serverIndex = 0; //Server index within a larger cluster
 
 //Function for initializing server
 function createServer(parentServer) {
@@ -98,7 +106,7 @@ function createServer(parentServer) {
 		serverCode(ws, true, req.socket.remoteAddress.substring(7, req.socket.remoteAddress.length), parentServer);
 
 		ws.on('close', function close() { //Disconnect
-			playerDisconnect(ws);
+			playerDisconnect(ws, parentServer);
 		});
 	});
 
@@ -110,10 +118,10 @@ function createServer(parentServer) {
 		serverCode(socket, false, socket.remoteAddress.substring(7, socket.remoteAddress.length), parentServer);
 
 		socket.on("error", function (err) { //Disconnect due to error
-			playerDisconnect(socket);
+			playerDisconnect(socket, parentServer);
 		});
 		socket.on("close", function (err) { //Disconnect
-			playerDisconnect(socket);
+			playerDisconnect(socket, parentServer);
 		});
 	});
 	tcpServer.listen(TCPPort, function () { //Start TCP server
@@ -125,11 +133,11 @@ function createServer(parentServer) {
 function serverCode(socket, isWS, addr, parentServer) {
 	const strID = uuidv4(); //Generate unique UID
 	socket.uid = strID; //Asign UID to socket variable
-	socket.id = playerCount; //Assign sequential ID (16bits) for packet identification
-	playerCount = (playerCount++ % 65636); //Iterate ID
-	socketList.push(socket); //Add socket to the list
+	socket.id = playerCount + serverIndex * 256; //Assign sequential ID (16bits) for packet identification. Including the serverIndex guarantees unique IDs across different servers inside a cluster
+	playerCount = (playerCount++ % 256); //Iterate ID
+	idToSocket[socket.id] = socket; //Add socket to object
 	console.log("New player: " + addr);
-	console.log("Current number of Players: " + socketList.length);
+	console.log("Current number of Players: " + Object.keys(idToSocket).length);
 
 	buf.fill(0); //Reset a buffer before sending it
 	buf.writeUInt8(serverNet.assign, 0); //Packet header
@@ -137,18 +145,25 @@ function serverCode(socket, isWS, addr, parentServer) {
 	buf.write(socket.uid, 3); //Write UID to buffer
 	writeToSocket(socket, buf); //Send buffer
 
+	if (parentServer != -1) { //Send the updated player count to the cluster
+		buf.fill(0);
+		buf.writeUInt8(clusterNet.count, 0);
+		buf.writeUInt8(Object.keys(idToSocket).length, 1);
+		writeToSocket(parentServer, buf);
+	}
+
 	let _dataName = "data"; //set data type (different between WS and TCP)
 	if (isWS) _dataName = "message";
 	socket.on(_dataName, function (data) //Recieving data from the player
 	{
 		switch (data.readUInt8(0)) { //Check possible headers
-			case clientNet.ID: //Confirming UID
+			case clientNet.ID: {//Confirming UID
 				socket.uid = readBufString(data, 1); //Sanitize buffer string (remove hidden characters/GMS packet identifiers)
 				socketToName[socket.uid] = "Joe"; //Set initial client entries
 				socketToOutfit[socket.uid] = "0242312170110255000000000000255";
 				socketToRoom[socket.uid] = "standby";
 				socketToPos[socket.uid] = ["0", "0"];
-				socketList.forEach(_sock => { //Send new player to all other players
+				Object.values(idToSocket).forEach(_sock => { //Send new player to all other players
 					if (_sock.id != socket.id) {
 						sendPlayerData(serverNet.pos, "0:0?1", socket.id, _sock); //Send position
 						sendPlayerData(serverNet.name, socketToName[_sock.uid], _sock.id, socket); //Send name
@@ -157,27 +172,18 @@ function serverCode(socket, isWS, addr, parentServer) {
 					}
 				});
 				break;
+			}
 
 			case clientNet.pos: //Recieving new player data
 			case clientNet.room:
 			case clientNet.outfit:
 			case clientNet.name:
-				var _data = readBufString(data, 1);
-				if (data.readUInt8(0) == clientNet.room) socketToRoom[socket.uid] = _data; //Update room
-				else if (data.readUInt8(0) == clientNet.name) socketToName[socket.uid] = _data; //Update name
-				else if (data.readUInt8(0) == clientNet.pos) { //Update position
-					socketToPos[socket.uid][0] = _data.substring(0, 7);
-					socketToPos[socket.uid][1] = _data.substring(8, 15);
-				}
-				else if (data.readUInt8(0) == clientNet.outfit) socketToOutfit[socket.uid] = _data; //Update outfit
-				socketList.forEach(_sock => { //Send update to other players
-					if (_sock.id != socket.id) sendPlayerData(data.readUInt8(0), _data, socket.id, _sock);
-				});
+				forwardPlayerData(data, socket, 0);
 				break;
 
-			case clientNet.message: //Recieving chat message
-				const _text = readBufString(data, 1);
-				socketList.forEach(_sock => {
+			case clientNet.message: { //Recieving chat message
+				let _text = readBufString(data, 1);
+				Object.values(idToSocket).forEach(_sock => {
 					if (_sock.id != socket.id) {
 						buf.fill(0);
 						buf.writeUInt8(serverNet.message, 0); //Message header
@@ -186,10 +192,11 @@ function serverCode(socket, isWS, addr, parentServer) {
 					}
 				});
 				break;
+			}
 
-			case clientNet.email: //Sending email (useful for bug reports, logging data, etc)
-				const _text = readBufString(data, 1);
-				var mailOptions = { //Nodemailer object
+			case clientNet.email: { //Sending email (useful for bug reports, logging data, etc)
+				let _text = readBufString(data, 1);
+				let mailOptions = { //Nodemailer object
 					from: 'exampleSender@gmail.com',
 					to: 'helpDesk@gmail.com',
 					//cc: 'otherPerson@gmail.com',
@@ -205,23 +212,32 @@ function serverCode(socket, isWS, addr, parentServer) {
 					}
 				});
 				break;
+			}
 
-			case clientNet.upload: //Upload data to Firebase
+			case clientNet.upload: { //Upload data to Firebase
+				//Example: player likes a photo submitted by another player
+				const _photoObj = JSON.parse(readBufString(data, 1)); //ID stored in JSON
+				ref.child("photos/"+_photoObj.ID).once("value").then(function(snapshot){ //Retrive copy of current Firebase entry for that photo
+					const _num=snapshot.toJSON()+1; //Get the number of likes + 1
+					ref.child("photos/"+_photoObj.ID).update({"likes": _num}); //Update the Firebase entry
+				});
 				break;
+			}
 
-			case clientNet.miscData: //event data send by player
+			case clientNet.miscData: { //event data send by player
 				var _data = JSON.parse(readBufString(data, 1));
 				break;
+			}
 
-			default: break;
+			default: { break; }
 		}
 	});
 }
 
-
 //OPTIONAL - connect this server to a parent server
 //Useful if this server needs to get data from another server or for loadbalancing traffic across a cluster of nodes
 const ipToConnect = "-1";
+let unifiedCluster = false; //Whether the server is co-hosting as part of a cluster
 if (ipToConnect != "-1") {
 	const serverSocket = new net.Socket();
 	const serverPort = 63459;
@@ -230,11 +246,28 @@ if (ipToConnect != "-1") {
 
 		createServer(socket); //Create the server, passing the parent server as an argument in case it needs to be referenced
 
-		serverSocket.on("data", function (data)//Recieving data from the server
+		serverSocket.on("data", function (data) //Recieving data from the cluster
 		{
 			switch (data.readUInt8(0)) {
-				//Packets from the parent server can be recieved here
-				default: break;
+				case clusterNet.playerData: {
+					const id = idToSocket[data.readUInt8(1)];
+					forwardPlayerData(data, id, 1);
+					break;
+				}
+				case clusterNet.miscData: {
+					let _data = JSON.parse(readBufString(data, 1));
+					break;
+				}
+				case clusterNet.type: {
+					if (data.readUInt8(1) == 1) unifiedCluster = true; //Update the cluster mode
+
+					buf.fill(0);
+					buf.writeUInt8(serverNet.mode, 0);
+					buf.writeUInt8(1, 1); //1 represents a server
+					writeToSocket(serverSocket, buf);
+					break;
+				}
+				default: { break; }
 			}
 		});
 	});
@@ -256,28 +289,41 @@ function writeToSocket(socket, dataBuf) { //Send a buffer to a socket - necessar
 	}
 }
 
-function playerDisconnect(socket) { //Player disconnects
-	var _ind = socketList.indexOf(socket);
-	if (_ind > -1) delete socketList[_ind];
-	socketList = removeEmpty(socketList);
-	socketList.forEach(_sock => { //Send the disconnect to every other player
+function forwardPlayerData(data, socket, dataOffset) {
+	var _data = readBufString(data, 1 + dataOffset);
+	if (data.readUInt8(0) == clientNet.room) socketToRoom[socket.uid] = _data; //Update room
+	else if (data.readUInt8(0) == clientNet.name) socketToName[socket.uid] = _data; //Update name
+	else if (data.readUInt8(0) == clientNet.pos) { //Update position
+		socketToPos[socket.uid][0] = _data.substring(0, 7);
+		socketToPos[socket.uid][1] = _data.substring(8, 15);
+	}
+	else if (data.readUInt8(0) == clientNet.outfit) socketToOutfit[socket.uid] = _data; //Update outfit
+	Object.values(idToSocket).forEach(_sock => { //Send update to other players
+		if (_sock.id != socket.id) sendPlayerData(data.readUInt8(0), _data, socket.id, _sock);
+	});
+}
+
+function playerDisconnect(socket, parentServer) { //Player disconnects
+	delete idToSocket[socket.id];
+	Object.values(idToSocket).forEach(_sock => { //Send the disconnect to every other player
 		buf.fill(0);
 		buf.writeUInt8(serverNet.leave, 0);
 		buf.writeUInt16LE(socket.id, 1);
 		writeToSocket(_sock, buf);
 	});
 
+	if (unifiedCluster) { //Send the disconnect to the cluster if this server is co-hosting
+		buf.fill(0);
+		buf.writeUInt8(serverNet.leave, 0);
+		buf.writeUInt16LE(socket.id, 1);
+		writeToSocket(parentServer, buf);
+	}
+
 	delete socketToName[socket.uid];
 	delete socketToOutfit[socket.uid];
 	delete socketToRoom[socket.uid];
 	delete socketToPos[socket.uid];
-	console.log("Remaining Players: " + socketList.length);
-}
-
-function removeEmpty(_list) { //Remove empty null items from an array
-	return _list.filter(function (el) {
-		return el != null;
-	});
+	console.log("Remaining Players: " + Object.keys(idToSocket).length);
 }
 
 function sendPlayerData(_type, _data, _fromSocket, _toSocket) {//Send player data from one socket to another socket
