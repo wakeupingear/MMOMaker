@@ -1,3 +1,3 @@
 ///@description Connect to server
-scrMMOSetup(network_socket_tcp) ;
+scrMMOSetup() ;
 scrMMOConnect(global.MMO_IP,global.MMO_Port);
