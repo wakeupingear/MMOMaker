@@ -6,42 +6,42 @@
 
 const serverNet = Object.freeze( //Enum for server-to-client packets
 	{
-		"assign": 0,
-		"message": 1,
-		"miscData": 2,
-		"pos": 3,
-		"room": 4,
-		"outfit": 5,
-		"name": 6,
-		"leave": 8
+		"assign": 1,
+		"message": 2,
+		"miscData": 3,
+		"pos": 4,
+		"myRoom": 5,
+		"outfit": 6,
+		"name": 7,
+		"leave": 8,
+		"playerObj": 9
 	});
 
 const clientNet = Object.freeze( //Enum for client-to-server packets
 	{
-		"ID": 9,
+		"ID": 20,
 
-		"pos": 10,
-		"room": 11,
-		"outfit": 12,
-		"name": 13,
+		"pos": 21,
+		"myRoom": 22,
+		"outfit": 23,
+		"name": 24,
 
-		"message": 14,
-		"email": 15,
-		"upload": 16,
-		"miscData": 17
+		"message": 25,
+		"email": 26,
+		"upload": 27,
+		"miscData": 28
 	});
 
 const clusterNet = Object.freeze( //Enum for cluster packets
 	{
-		"count": 18,
-		"playerData": 19,
-		"miscData": 20,
-		"type": 21,
-		"serverData": 22,
-		"queue": 23,
-		"leave": 24
+		"count": 40,
+		"playerData": 41,
+		"miscData": 42,
+		"type": 43,
+		"serverData": 44,
+		"queue": 45,
+		"leave": 46
 	});
-
 
 let serverIndex = 0; //Server index within a larger cluster
 let playerCount = 0; //Number of connected players
@@ -143,7 +143,7 @@ function serverCode(socket, isWS, addr, serverSocket) {
 	socket.isWS = isWS;
 	socket.uid = uuidv4(); //Asign UID to socket variable
 	socket.id = playerCount + serverIndex * 256; //Assign sequential ID (16bits) for packet identification. Including the serverIndex guarantees unique IDs across different servers inside a cluster
-	playerCount = (playerCount++ % 256); //Iterate ID
+	playerCount = ((playerCount + 1) % 256); //Iterate ID
 	idToSocket[socket.id] = socket; //Add socket to object
 	console.log("New player: " + addr);
 	console.log("Current number of Players: " + Object.keys(idToSocket).length);
@@ -163,84 +163,95 @@ function serverCode(socket, isWS, addr, serverSocket) {
 
 	let _dataName = "data"; //set data type (different between WS and TCP)
 	if (isWS) _dataName = "message";
-	socket.on(_dataName, function (data) {processPacket(socket,data,serverSocket)}); //Recieving data from the player
+	socket.on(_dataName, function (data) { processPacket(socket, data, serverSocket) }); //Recieving data from the player
 }
 
-function processPacket(socket,data,serverSocket) { //Code to process packet data
-	switch (data.readUInt8(0)) { //Check possible headers
-		case clientNet.ID: {//Confirming UID
-			let _data = JSON.parse(readBufString(data, 1)); //Sanitize buffer string (remove hidden characters/GMS packet identifiers)
-			socket.uid = _data.uid; //Set UID
-			socketToData[socket.uid] = _data; //Store data
-			console.log(socketToData[socket.uid])
-			Object.values(idToSocket).forEach(_sock => { //Send new player to all other players
-				if (_sock.id != socket.id) {
-					sendPlayerData(serverNet.pos, _data.pos, socket.id, _sock); //Send position
-					sendPlayerData(serverNet.name, _data.name, _sock.id, socket); //Send name
-					sendPlayerData(serverNet.outfit, _data.outfit, _sock.id, socket); //Send outfit
-					sendPlayerData(serverNet.room, _data.room, _sock.id, socket); //Send room
-				}
-			});
-			break;
+function processPacket(socket, data, serverSocket) { //Code to process packet data
+	const _totalLen = Buffer.byteLength(data);
+	let _offset = 0;
+	let _end = 0;
+	while (_offset < _totalLen) {
+		_end = _offset+data.readInt16LE(_offset);
+		switch (data.readUInt8(2 + _offset)) { //Check possible headers
+			case clientNet.ID: {//Confirming UID
+				let _str = readBufString(data, 3 + _offset, _end); //Sanitize buffer string (remove hidden characters/GMS packet identifiers)
+				let _data = JSON.parse(_str);
+				while (_data.uid in socketToData) _data.uid += "f"; //If two+ clients are created on the same computer at the same time, this stops collisions (good for testing)
+				socket.uid = _data.uid; //Set UID
+				socketToData[socket.uid] = _data; //Store data
+
+				bufLarge.fill(0); //Send the connection to every other player
+				bufLarge.writeUInt8(serverNet.playerObj, 0);
+				bufLarge.writeUInt8(socket.id, 1);
+				bufLarge.write(_str, 2);
+				Object.values(idToSocket).forEach(_sock => {
+					if (_sock.id != socket.id) writeToSocket(_sock, bufLarge);
+				});
+
+				Object.values(idToSocket).forEach(_sock => { //Send other players to this player
+					if (_sock.id != socket.id) {
+						bufLarge.fill(0);
+						bufLarge.writeUInt8(serverNet.playerObj, 0);
+						bufLarge.writeUInt8(_sock.id, 1);
+						bufLarge.write(JSON.stringify(socketToData[_sock.uid]), 2);
+						writeToSocket(socket, bufLarge);
+					}
+				});
+				break;
+			}
+
+			case clientNet.message: { //Recieving chat message
+				let _text = readBufString(data, 3 + _offset, _end);
+				Object.values(idToSocket).forEach(_sock => {
+					if (_sock.id != socket.id) {
+						bufLarge.fill(0);
+						bufLarge.writeUInt8(serverNet.message, 0); //Message header
+						bufLarge.write(_text, 1); //Message contents
+						writeToSocket(_sock, bufLarge);
+					}
+				});
+				break;
+			}
+
+			case clientNet.email: { //Sending email
+				//Example: player submits a bug report
+				let _text = readBufString(data, 3 + _offset, _end);
+				let mailOptions = { //Nodemailer object
+					from: 'exampleSender@gmail.com',
+					to: 'helpDesk@gmail.com',
+					//cc: 'otherPerson@gmail.com',
+					subject: 'Bug Report - Player ' + socketToName[socket.id] + " #" + socket.uid,
+					text: 'Bug report:\n\n' + _text
+				};
+
+				transporter.sendMail(mailOptions, function (error, info) { //Send email asyncronously
+					if (error) {
+						console.log(error);
+					} else {
+						console.log('Email sent: ' + info.response);
+					}
+				});
+				break;
+			}
+
+			case clientNet.upload: { //Upload data to Firebase
+				//Example: player likes a photo submitted by another player
+				const _photoObj = JSON.parse(readBufString(data, 3 + _offset, _end)); //ID stored in JSON
+				ref.child("photos/" + _photoObj.ID).once("value").then(function (snapshot) { //Retrive copy of current Firebase entry for that photo
+					const _num = snapshot.toJSON() + 1; //Get the number of likes + 1
+					ref.child("photos/" + _photoObj.ID).update({ "likes": _num }); //Update the Firebase entry
+				});
+				break;
+			}
+
+			case clientNet.miscData: { //event data send by player
+				var _data = JSON.parse(readBufString(data, 3 + _offset, _end));
+				break;
+			}
+
+			default: { forwardPlayerData(data, socket, 2 + _offset, serverSocket, _end); }
 		}
-
-		case clientNet.pos: //Recieving new player data
-		case clientNet.room:
-		case clientNet.outfit:
-		case clientNet.name:
-			forwardPlayerData(data, socket, 0,serverSocket);
-			break;
-
-		case clientNet.message: { //Recieving chat message
-			let _text = readBufString(data, 1);
-			Object.values(idToSocket).forEach(_sock => {
-				if (_sock.id != socket.id) {
-					bufLarge.fill(0);
-					bufLarge.writeUInt8(serverNet.message, 0); //Message header
-					bufLarge.write(_text, 1); //Message contents
-					writeToSocket(_sock, bufLarge);
-				}
-			});
-			break;
-		}
-
-		case clientNet.email: { //Sending email
-			//Example: player submits a bug report
-			let _text = readBufString(data, 1);
-			let mailOptions = { //Nodemailer object
-				from: 'exampleSender@gmail.com',
-				to: 'helpDesk@gmail.com',
-				//cc: 'otherPerson@gmail.com',
-				subject: 'Bug Report - Player ' + socketToName[socket.id] + " #" + socket.uid,
-				text: 'Bug report:\n\n' + _text
-			};
-
-			transporter.sendMail(mailOptions, function (error, info) { //Send email asyncronously
-				if (error) {
-					console.log(error);
-				} else {
-					console.log('Email sent: ' + info.response);
-				}
-			});
-			break;
-		}
-
-		case clientNet.upload: { //Upload data to Firebase
-			//Example: player likes a photo submitted by another player
-			const _photoObj = JSON.parse(readBufString(data, 1)); //ID stored in JSON
-			ref.child("photos/" + _photoObj.ID).once("value").then(function (snapshot) { //Retrive copy of current Firebase entry for that photo
-				const _num = snapshot.toJSON() + 1; //Get the number of likes + 1
-				ref.child("photos/" + _photoObj.ID).update({ "likes": _num }); //Update the Firebase entry
-			});
-			break;
-		}
-
-		case clientNet.miscData: { //event data send by player
-			var _data = JSON.parse(readBufString(data, 1));
-			break;
-		}
-
-		default: { break; }
+		_offset = _end;
 	}
 }
 
@@ -254,20 +265,16 @@ if (ipToConnect != "-1") {
 	socket = serverSocket.connect(serverPort, ipToConnect, function () { //Connect to parent server
 		console.log("Connected to ServerManager " + ipToConnect);
 		socket.isWS = false;
-		socket.id=-1;
-		socket.uid="";
+		socket.id = -1;
+		socket.uid = "";
 		createServer(socket); //Create the server, passing the parent server as an argument in case it needs to be referenced
 
 		socket.on("data", function (data) //Recieving data from the cluster
 		{
+			let _len = Buffer.byteLength(data);
 			switch (data.readUInt8(0)) {
-				case clusterNet.playerData: {
-					const id = idToSocket[data.readUInt8(1)];
-					forwardPlayerData(data, id, 1,-1);
-					break;
-				}
 				case clusterNet.miscData: {
-					let _data = JSON.parse(readBufString(data, 1));
+					let _data = JSON.parse(readBufString(data, 1, _len));
 					break;
 				}
 				case clusterNet.type: {
@@ -280,7 +287,11 @@ if (ipToConnect != "-1") {
 					writeToSocket(serverSocket, buf);
 					break;
 				}
-				default: { processPacket(socket,data,-1); } //Data coming from another node in a cluster
+				case clusterNet.serverData: {
+					nodes = JSON.parse(readBufString(data, 1, _len));
+					break;
+				}
+				default: { processPacket(socket, data, -1); } //Data coming from another node in a cluster
 			}
 		});
 	});
@@ -302,21 +313,22 @@ function writeToSocket(socket, dataBuf) { //Send a buffer to a socket - necessar
 	}
 }
 
-function forwardPlayerData(data, socket, dataOffset,serverSocket) {
-	if (data.readUInt8(0) == clientNet.pos) { //Update position
-		let _data = [data.readInt16LE(1 + dataOffset), data.readInt16LE(3 + dataOffset)];
+function forwardPlayerData(data, socket, dataOffset, serverSocket, end) {
+	let _data = -1;
+	if (data.readUInt8(dataOffset) == clientNet.pos) { //Update position
+		_data = [data.readInt16LE(1 + dataOffset), data.readInt16LE(3 + dataOffset), data.readUInt8(5 + dataOffset)];
 		socketToData[socket.uid].pos = _data;
 	}
 	else {
-		let _data = readBufString(data, 1 + dataOffset);
-		if (data.readUInt8(0) == clientNet.room) socketToData[socket.uid].room = _data; //Update room
-		else if (data.readUInt8(0) == clientNet.name) socketToData[socket.uid].name = _data; //Update name
-		else if (data.readUInt8(0) == clientNet.outfit) socketToOutfit[socket.uid] = _data; //Update outfit
+		_data = readBufString(data, 1 + dataOffset, end);
+		if (data.readUInt8(dataOffset) == clientNet.myRoom) socketToData[socket.uid].myRoom = _data; //Update room
+		else if (data.readUInt8(dataOffset) == clientNet.name) socketToData[socket.uid].name = _data; //Update name
+		else if (data.readUInt8(dataOffset) == clientNet.outfit) socketToData[socket.uid].outfit = _data; //Update outfit
 	}
 	Object.values(idToSocket).forEach(_sock => { //Send update to other players
-		if (_sock.id != socket.id) sendPlayerData(data.readUInt8(0), _data, socket.id, _sock);
+		if (_sock.id != socket.id) sendPlayerData(data.readUInt8(dataOffset), _data, socket.id, _sock);
 	});
-	if (unifiedCluster&&serverSocket!=-1) sendPlayerData(data.readUInt8(0), _data, socket.id,serverSocket);
+	if (unifiedCluster && serverSocket != -1) sendPlayerData(data.readUInt8(dataOffset), _data, socket.id, serverSocket);
 }
 
 function playerDisconnect(socket, serverSocket) { //Player disconnects
@@ -339,18 +351,19 @@ function playerDisconnect(socket, serverSocket) { //Player disconnects
 	console.log("Remaining Players: " + Object.keys(idToSocket).length);
 }
 
-function sendPlayerData(_type, _data, _fromSocket, _toSocket) {//Send player data from one socket to another socket
+function sendPlayerData(_type, _data, _fromSocketID, _toSocket) {//Send player data from one socket to another socket
 	buf.fill(0);
 	buf.writeUInt8(_type, 0);
-	buf.writeUInt16LE(_fromSocket, 1);
+	buf.writeUInt16LE(_fromSocketID, 1);
 	if ((typeof _data) == "string") buf.write(_data, 3); //Write string data
 	else { //Arry of positions
-		buf.writeInt16LE(_data[0], 2);
-		buf.writeInt16LE(_data[1], 4);
+		buf.writeInt16LE(_data[0], 3);
+		buf.writeInt16LE(_data[1], 5);
+		buf.writeUInt8(_data[2], 7)
 	}
 	writeToSocket(_toSocket, buf);
 }
 
-function readBufString(str, ind) { //Sanitize a string to remove GMS headers and characters
-	return str.toString("utf-8", ind).replace(/\0/g, '').replace("\u0005", "");
+function readBufString(str, ind, end) { //Sanitize a string to remove GMS headers and characters
+	return str.toString("utf-8", ind, end).replace(/\0/g, '').replace("\u0005", "");
 }

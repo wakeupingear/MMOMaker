@@ -1,39 +1,40 @@
 const serverNet = Object.freeze( //Enum for server-to-client packets
     {
-        "assign": 0,
-        "message": 1,
-        "miscData": 2,
-        "pos": 3,
-        "room": 4,
-        "outfit": 5,
-        "name": 6,
-        "leave": 8
+        "assign": 1,
+        "message": 2,
+        "miscData": 3,
+        "pos": 4,
+        "myRoom": 5,
+        "outfit": 6,
+        "name": 7,
+        "leave": 8,
+		"playerObj": 9
     });
 
 const clientNet = Object.freeze( //Enum for client-to-server packets
     {
-        "ID": 9,
+        "ID": 20,
 
-        "pos": 10,
-        "room": 11,
-        "outfit": 12,
-        "name": 13,
+        "pos": 21,
+        "myRoom": 22,
+        "outfit": 23,
+        "name": 24,
 
-        "message": 14,
-        "email": 15,
-        "upload": 16,
-        "miscData": 17
+        "message": 25,
+        "email": 26,
+        "upload": 27,
+        "miscData": 28
     });
 
 const clusterNet = Object.freeze( //Enum for cluster packets
     {
-        "count": 18,
-        "playerData": 19,
-        "miscData": 20,
-        "type": 21,
-        "serverData": 22,
-        "queue": 23,
-        "leave": 24
+        "count": 40,
+        "playerData": 41,
+        "miscData": 42,
+        "type": 43,
+        "serverData": 44,
+        "queue": 45,
+        "leave": 46
     });
 
 const net = require("net");
@@ -67,6 +68,7 @@ const serverList = []; //List of all servers
 function serverCode(socket, isWS, addr) {
     socket.id = -1;
     socket.uid = uuidv4(); //Asign UID to socket variable
+    socket.isWS = isWS;
 
     buf.fill(0);
     buf.writeUInt8(clusterNet.type, 0); //Ping the socket to check if it's a player (0) or a server (1)
@@ -82,25 +84,9 @@ function serverCode(socket, isWS, addr) {
                 nodes[socket.id].count++; //Increase the count (decreasing happens in serverNet.leave)
                 break;
             }
-            case clusterNet.playerData: { //Send player data to the other servers
-                const _id = data.readUInt16LE(1);
-                const _type = data.readUInt8(3);
-                const _data = readBufString(data, 4);
-                Objects.values(nodes).forEach(sock => {
-                    if (sock.id != socket.id) {
-                        buf.fill(0);
-                        buf.writeUInt8(clusterNet.playerData, 0);
-                        buf.writeUInt16LE(_id, 1);
-                        buf.write(_type, 3);
-                        buf.write(_data, 4);
-                        writeToSocket(sock, buf);
-                    }
-                });
-                break;
-            }
             case serverNet.leave: { //Send a player leave event to the other servers
                 nodes[socket.id].count--;
-                var _id = data.readUInt16LE(1);
+                var _id = data.readUInt16LE(3);
                 if (unifiedCluster) {
                     Objects.values(nodes).forEach(sock => {
                         if (sock.id != socket.id) {
@@ -121,7 +107,7 @@ function serverCode(socket, isWS, addr) {
                 break;
             }
             case clusterNet.miscData: {
-                let _data = JSON.parse(readBufString(data, 1));
+                let _data = JSON.parse(readBufString(data, 3));
                 break;
             }
             case clusterNet.type: { //Identifier of what kind of client this is
@@ -138,22 +124,24 @@ function serverCode(socket, isWS, addr) {
                         c: 0 //playerCount
                     }
                     serverList.push({ uid: socket.uid, sock: socket });
+                    if (queue.length>0) sendServerBrowser(queue[1]);
                     if (unifiedCluster) serverList.forEach(server => { sendServerBrowser(server.sock); }); //Send updated server list to nodes
                 }
                 break;
             }
             case clusterNet.queue: { //Player requesting place in queue
                 queue.push(socket.uid, socket); //Add the UID (removing from the queue if they disconnect) and the socket (sending updates)
-                sendPlayerQueuePos(socket, queue.length) //Send place in queue to player
+                sendPlayerQueuePos(socket, queue.length/2) //Send place in queue to player
                 break;
             }
             case clusterNet.leave: {
                 if (!isWS) socket.destroy();
                 else socket.close();
+                break;
             }
             default: {
                 if (unifiedCluster) serverList.forEach(server => { //Pass data to other server nodes
-                    if (server.uid!=socket.uid) writeToSocket(server.sock,data);
+                    if (server.uid != socket.uid) writeToSocket(server.sock, data);
                 });
             }
         }
@@ -213,13 +201,13 @@ function clientDisconnect(socket) { //Player disconnects
         }
         if (unifiedCluster) serverList.forEach(server => { sendServerBrowser(server.sock); }); //Send updated server list to nodes
         delete nodes[socket.id];
-        console.log("Remaining Nodes: " + (Object.keys(nodes).length-1));
+        console.log("Remaining Nodes: " + (Object.keys(nodes).length - 1));
     }
     else { //Player
         let qInd = queue.indexOf(socket.uid);
-        if (qInd > 0) {
+        if (qInd > -1) {
             queue.splice(qInd, 2); //Remove the player from the queue
-            for (let i = 0; i < queue.length; i += 2) sendPlayerQueuePos(queue[i + 1], i); //Update other queued players
+            for (let i = 0; i < queue.length; i += 2) sendPlayerQueuePos(queue[i + 1], i / 2); //Update other queued players
         }
     }
 }
@@ -231,7 +219,7 @@ function readBufString(str, ind) { //Sanitize a string to remove GMS headers and
 function sendPlayerQueuePos(socket, pos) {
     buf.fill(0); //Send place in queue to player
     buf.writeUInt8(clusterNet.queue, 0);
-    buf.writeUInt16(pos + 1, 1);
+    buf.writeUInt16LE(pos, 1);
     writeToSocket(socket, buf);
 }
 

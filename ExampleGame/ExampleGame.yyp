@@ -1,7 +1,12 @@
 {
   "resources": [
+    {"id":{"name":"oOtherPlayer","path":"objects/oOtherPlayer/oOtherPlayer.yy",},"order":2,},
+    {"id":{"name":"oPlayer","path":"objects/oPlayer/oPlayer.yy",},"order":1,},
+    {"id":{"name":"rStart","path":"rooms/rStart/rStart.yy",},"order":1,},
+    {"id":{"name":"sPly","path":"sprites/sPly/sPly.yy",},"order":0,},
     {"id":{"name":"MMOScripts","path":"scripts/MMOScripts/MMOScripts.yy",},"order":0,},
     {"id":{"name":"controller","path":"objects/controller/controller.yy",},"order":0,},
+    {"id":{"name":"oCharacter","path":"objects/oCharacter/oCharacter.yy",},"order":3,},
     {"id":{"name":"startup","path":"rooms/startup/startup.yy",},"order":0,},
   ],
   "Options": [
@@ -20,10 +25,11 @@
   },
   "RoomOrderNodes": [
     {"roomId":{"name":"startup","path":"rooms/startup/startup.yy",},},
+    {"roomId":{"name":"rStart","path":"rooms/rStart/rStart.yy",},},
   ],
   "Folders": [
     {"folderPath":"folders/Sprites.yy","order":1,"resourceVersion":"1.0","name":"Sprites","tags":[],"resourceType":"GMFolder",},
-    {"folderPath":"folders/Tile Sets.yy","order":2,"resourceVersion":"1.0","name":"Tile Sets","tags":[],"resourceType":"GMFolder",},
+    {"folderPath":"folders/Timelines/Tile Sets.yy","order":0,"resourceVersion":"1.0","name":"Tile Sets","tags":[],"resourceType":"GMFolder",},
     {"folderPath":"folders/Sounds.yy","order":3,"resourceVersion":"1.0","name":"Sounds","tags":[],"resourceType":"GMFolder",},
     {"folderPath":"folders/Paths.yy","order":4,"resourceVersion":"1.0","name":"Paths","tags":[],"resourceType":"GMFolder",},
     {"folderPath":"folders/Scripts.yy","order":5,"resourceVersion":"1.0","name":"Scripts","tags":[],"resourceType":"GMFolder",},
@@ -45,7 +51,7 @@
   ],
   "IncludedFiles": [],
   "MetaData": {
-    "IDEVersion": "2.3.1.542",
+    "IDEVersion": "2.3.2.556",
   },
   "resourceVersion": "1.4",
   "name": "ExampleGame",

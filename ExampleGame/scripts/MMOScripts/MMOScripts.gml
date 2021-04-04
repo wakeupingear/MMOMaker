@@ -1,58 +1,61 @@
 function scrMMOSetup(){
 	enum serverNet //Enum for server-to-client packets
 	{
-		assign= 0,
-		message= 1,
-		miscData= 2,
-		pos= 3,
-		room= 4,
-		outfit= 5,
-		name= 6,
-		leave= 8
+		assign= 1,
+		message= 2,
+		miscData= 3,
+		pos= 4,
+		myRoom= 5,
+		outfit= 6,
+		name= 7,
+		leave= 8,
+		playerObj= 9
 	}
 
 	enum clientNet //Enum for client-to-server packets
 	{
-		ID= 9,
+		ID= 20,
 
-		pos= 10,
-		room= 11,
-		outfit= 12,
-		name= 13,
+		pos= 21,
+		myRoom= 22,
+		outfit= 23,
+		name= 24,
 
-		message= 14,
-		email= 15,
-		upload= 16,
-		miscData= 17
+		message= 25,
+		email= 26,
+		upload= 27,
+		miscData= 28
 	}
 
 	enum clusterNet //Enum for cluster packets
 	{
-		count= 18,
-		playerData= 19,
-		miscData= 20,
-		type= 21,
-		serverData= 22,
-		queue= 23,
-		leave= 24
+		count= 40,
+		playerData= 41,
+		miscData= 42,
+		type= 43,
+		serverData= 44,
+		queue= 45,
+		leave= 46
 	}
-
-	global.MMO_IP="127.0.0.1";
-	global.MMO_Port=63458;
 
 	global.MMO_Buf=buffer_create(512,buffer_fixed,1);
 	global.MMO_BufLarge=buffer_create(4096,buffer_fixed,1);
 	scrMMOCreateSocket();
+	global.MMO_IP="127.0.0.1";
+	global.MMO_Port=63456+global.MMO_isWS;
 
 	global.MMO_SavePath="saveData.ini";
 	global.MMO_UID="";
+	global.MMO_ID=-1;
 
 	global.MMO_Players={};
+	global.MMO_PlayerObject=oPlayer;
+	global.MMO_OtherPlayerObject=oOtherPlayer;
 	global.MMO_ServerBrowser={};
 	global.MMO_ServerBrowserType=0;
 	global.MMO_isCluster=false;
-	global.MMO_UnifiedCluster=0;
-	global.MMO_ConnectAgain=false;
+	global.MMO_ClusterMode=0;
+	global.MMO_QueuePos=-1;
 
 	global.playerName="Joe";
 	global.playerOutfit="0242312170110255000000000000255"
@@ -62,7 +65,7 @@ function scrMMOSetup(){
 }
 
 function scrMMOCreateSocket(){
-	if (os_type==os_browser){
+	if (os_browser!=browser_not_a_browser){
 		global.MMO_isWS=true;
 		global.MMO_Socket=network_create_socket(network_socket_ws);
 	}
@@ -77,7 +80,7 @@ function scrMMOConnect(ipOPTIONAL,portOPTIONAL){ //Connect to a server
 	if is_undefined(ipOPTIONAL) ipOPTIONAL=global.MMO_IP;
 	if is_undefined(portOPTIONAL) portOPTIONAL=global.MMO_Port;
 	scrMMOCreateSocket(); //Force a socket reset before connecting to a new server
-	network_connect_raw(global.MMO_Socket,ipOPTIONAL,portOPTIONAL);
+	network_connect_raw_async(global.MMO_Socket,ipOPTIONAL,portOPTIONAL);
 }
 
 function scrMMOSave(){ //Save MMO and player data
@@ -97,39 +100,49 @@ function scrMMOLoad(){ //Load MMO and player data
 	ini_close();
 }
 
-function scrMMOGetPacket(network_map,playerObj){ //Process a packet - put this in an Async - Networking event
+function scrMMOGetPacket(network_map){ //Process a packet - put this in an Async - Networking event
 	var buffer=network_map[? "buffer"];
-	var _size=network_map[? "size"]
+	var _size=network_map[? "size"];
 	if !is_undefined(buffer){
 		buffer_seek(buffer,buffer_seek_start,0);
-		//while( buffer_tell(buffer) < _size ){
+		for (var _bufferInd=1;buffer_tell(buffer)< _size;_bufferInd++){
 		{
 			switch (network_map[? "type"]){
 				case network_type_data:
-					switch (buffer_read(buffer,buffer_u8)){
+					var _header=buffer_read(buffer,buffer_u8);
+					switch (_header){
+						case 0: break; //Empty byte between packets
 						case serverNet.assign:
-							global.MMO_Players[$ "player"]={
-								obj: instance_nearest(x,y,controller),
-								ind: buffer_read(buffer,buffer_u16)
+							global.MMO_ID=string(buffer_read(buffer,buffer_u16));
+							global.MMO_Players[$ global.MMO_ID]={
+								obj: "player",
+								ind: global.MMO_ID
 							}
+							var _uid=buffer_read(buffer,buffer_string);
 							if global.MMO_UID=="" {
-								global.MMO_UID=buffer_read(buffer,buffer_string);
+								global.MMO_UID=_uid;
 								scrMMOSave();
 							}
-							buffer_seek(global.MMO_BufLarge,buffer_seek_start,0);
-							buffer_write(global.MMO_BufLarge,buffer_u16,clientNet.ID);
+							buffer_seek(global.MMO_BufLarge,buffer_seek_start,2);
+							buffer_write(global.MMO_BufLarge,buffer_u8,clientNet.ID);
 							var _data={
 								uid: global.MMO_UID,
 								name: global.playerName,
 								outfit: global.playerOutfit,
-								room: room_get_name(room),
-								pos: [0,0]
+								myRoom: room_get_name(room),
+								pos: [0,0,1]
 							}
 							buffer_write(global.MMO_BufLarge,buffer_string,json_stringify(_data));
-							scrMMOSendPacket(global.MMO_BufLarge);
+							scrMMOSendPacketLen(global.MMO_BufLarge);
+							scrMMOJoinGame();
+							break;
+						case serverNet.playerObj:
+							var _id=buffer_read(buffer,buffer_u8);
+							var _data=json_parse(buffer_read(buffer,buffer_string));
+							scrMMOCreateOtherPlayer(_id,_data);
 							break;
 						case clusterNet.type:
-							global.MMO_UnifiedCluster=buffer_read(buffer,buffer_u8);
+							global.MMO_ClusterMode=buffer_read(buffer,buffer_u8);
 							global.MMO_isCluster=true;
 							buffer_seek(global.MMO_Buf,buffer_seek_start,0);
 							buffer_write(global.MMO_Buf,buffer_u8,clusterNet.type);
@@ -137,28 +150,48 @@ function scrMMOGetPacket(network_map,playerObj){ //Process a packet - put this i
 							scrMMOSendPacket(global.MMO_Buf);
 							break;
 						case clusterNet.serverData:
-							global.MMO_ServerBrowser= json_parse(buffer_read(buffer,buffer_string));
+							var _data=buffer_read(buffer,buffer_string);
+							global.MMO_ServerBrowser= json_parse(_data);
 							scrMMOServerBrowser();
 							break;
+						case clusterNet.queue:
+							global.MMO_QueuePos=buffer_read(buffer,buffer_u16);
+							show_debug_message("Place in Queue: "+string(global.MMO_QueuePos));
+							break;
+						case serverNet.leave:
+							var _id=string(buffer_read(buffer,buffer_u16));
+							instance_destroy(global.MMO_Players[$ _id].obj);
+							variable_struct_remove(global.MMO_Players,_id);
+							break;
+						case clientNet.pos:
+							var _id=string(buffer_read(buffer,buffer_u16));
+							var _x=buffer_read(buffer,buffer_s16);
+							var _y=buffer_read(buffer,buffer_s16);
+							var _t=buffer_read(buffer,buffer_u8);
+							scrMMOGetData(_id,_header,[_x,_y,_t]);
+							break;
 						default:
+							var _id=string(buffer_read(buffer,buffer_u16));
+							scrMMOGetData(_id,_header,buffer_read(buffer,buffer_string));
 							break;
 					}
 					break;
+				}
 			}
+			buffer_seek(buffer,buffer_seek_start,min(_size,_bufferInd*512));
 		}
 	}
 }
 
-function scrMMODisconnect(isCluster){ //Send a disconnect request (network_destroy doesn't work on every platform)
-	buffer_seek(global.MMO_Buf,buffer_seek_start,0);
+function scrMMODisconnect(isCluster,connectAgain){ //Send a disconnect request (network_destroy doesn't work on every platform)
+	buffer_seek(global.MMO_Buf,buffer_seek_start,2);
 	if !isCluster buffer_write(global.MMO_Buf,buffer_u8,serverNet.leave);
 	else buffer_write(global.MMO_Buf,buffer_u8,clusterNet.leave);
-	scrMMOSendPacket(global.MMO_Buf);
+	scrMMOSendPacketLen(global.MMO_Buf);
 	
 	show_debug_message("Disconnected from Server");
 	global.MMO_Players={};
-	if global.MMO_ConnectAgain {
-		global.MMO_ConnectAgain=false;
+	if connectAgain {
 		scrMMOConnect();
 	}
 }
@@ -170,25 +203,158 @@ function scrMMOServerBrowser(){ //Process server browser when connecting to a cl
 			var _minPlayers=global.MMO_ServerBrowser.cap;
 			var _names=variable_struct_get_names(global.MMO_ServerBrowser);
 			for (var i=0;i<array_length(_names);i++){
-				if _names[i]!="cap"&&global.MMO_ServerBrowser[$ _names[i]].c<_minPlayers _serverInd=_names[i];
+				if _names[i]!="cap"&&global.MMO_ServerBrowser[$ _names[i]].c<_minPlayers {
+					_minPlayers=global.MMO_ServerBrowser[$ _names[i]].c;
+					_serverInd=_names[i];
+				}
 			}
-			if _serverInd==-1{ //All servers are at max capacity
-				show_debug_message("Servers are full!");
-
-				buffer_seek(global.MMO_Buf,buffer_seek_start,0); //Join the lobby queue
-				buffer_write(global.MMO_Buf,buffer_u8,clusterNet.queue);
-				scrMMOSendPacket(global.MMO_Buf);
+			break;
+		case 1: //Connect to the most full server
+			var _serverInd=-1;
+			var _minPlayers=-1;
+			var _names=variable_struct_get_names(global.MMO_ServerBrowser);
+			for (var i=0;i<array_length(_names);i++){
+				if _names[i]!="cap"&&global.MMO_ServerBrowser[$ _names[i]].c>_minPlayers&&global.MMO_ServerBrowser[$ _names[i]].c<global.MMO_ServerBrowser.cap{
+					_minPlayers=global.MMO_ServerBrowser[$ _names[i]].c;
+					_serverInd=_names[i];
+				}
 			}
-			else {
-				global.MMO_IP=global.MMO_ServerBrowser[$ _serverInd].ip;
-				global.MMO_Port=int64(global.MMO_ServerBrowser[$ _serverInd].p);
-				global.MMO_ConnectAgain=true;
-				scrMMODisconnect(true);
-			}
+			break;
 		default: break;
 	}
+
+	if _serverInd==-1{ //All servers are at max capacity
+		show_debug_message("Servers are full!");
+		buffer_seek(global.MMO_Buf,buffer_seek_start,0); //Join the lobby queue
+		buffer_write(global.MMO_Buf,buffer_u8,clusterNet.queue);
+		scrMMOSendPacket(global.MMO_Buf);
+	}
+	else {
+		global.MMO_IP=global.MMO_ServerBrowser[$ _serverInd].ip;
+		global.MMO_Port=int64(global.MMO_ServerBrowser[$ _serverInd].p);
+		scrMMODisconnect(true,true);
+	}
+}
+
+function scrMMOSendPacketLen(buffer){ //Simplify packet sending
+	var _len=buffer_tell(buffer);
+	buffer_seek(buffer,buffer_seek_start,0);
+	buffer_write(buffer,buffer_u16,_len);
+	network_send_raw(global.MMO_Socket,buffer,_len);
 }
 
 function scrMMOSendPacket(buffer){ //Simplify packet sending
 	network_send_raw(global.MMO_Socket,buffer,buffer_tell(buffer));
+}
+
+function scrMMOSendPosition(x,y,teleport){//Send a position packet (teleport shows that the player snaps to a position regardless of movement type)
+	buffer_seek(global.MMO_Buf,buffer_seek_start,2);
+	buffer_write(global.MMO_Buf,buffer_u8,clientNet.pos);
+	buffer_write(global.MMO_Buf,buffer_s16,x);
+	buffer_write(global.MMO_Buf,buffer_s16,y);
+	buffer_write(global.MMO_Buf,buffer_u8,teleport);
+	scrMMOSendPacketLen(global.MMO_Buf);
+}
+
+function scrMMOSendRoom(myRoom){
+	if !is_string(myRoom) myRoom=room_get_name(myRoom);
+
+	buffer_seek(global.MMO_Buf,buffer_seek_start,2);
+	buffer_write(global.MMO_Buf,buffer_u8,clientNet.myRoom);
+	buffer_write(global.MMO_Buf,buffer_string,myRoom);
+	scrMMOSendPacketLen(global.MMO_Buf);
+}
+
+function scrMMOSendOutfit(outfit){
+	buffer_seek(global.MMO_Buf,buffer_seek_start,2);
+	buffer_write(global.MMO_Buf,buffer_u8,clientNet.outfit);
+	buffer_write(global.MMO_Buf,buffer_string,outfit);
+	scrMMOSendPacketLen(global.MMO_Buf);
+}
+
+function scrMMOSendName(name){
+	buffer_seek(global.MMO_Buf,buffer_seek_start,2);
+	buffer_write(global.MMO_Buf,buffer_u8,clientNet.name);
+	buffer_write(global.MMO_Buf,buffer_string,name);
+	scrMMOSendPacketLen(global.MMO_Buf);
+}
+
+function scrMMOCreateOtherPlayer(serverID,data){
+	if !is_string(serverID) serverID=string(serverID);
+	if !variable_struct_exists(global.MMO_Players,serverID) {
+		global.MMO_Players[$ serverID]={
+			obj: instance_create_depth(x,y,0,global.MMO_OtherPlayerObject),
+			ind: serverID,
+		}
+		global.MMO_Players[$ serverID].obj.serverID=serverID;
+	}
+
+	var _obj=global.MMO_Players[$ serverID].obj;
+	var _names=variable_struct_get_names(data);
+	for (var i=0;i<array_length(_names);i++){
+		switch _names[i] {
+			case "pos":
+				_obj.x=data.pos[0];
+				_obj.y=data.pos[1];
+				_obj.target_x=data.pos[0];
+				_obj.target_y=data.pos[0];
+				break;
+			case "myRoom":
+				_obj.myRoom=asset_get_index(data.myRoom);
+				break;
+			case "name":
+				_obj.name=data.name;
+				_obj.nameWidth=string_width(data.name) - (string_width(data.name) mod 2);
+				break;
+			default:
+				variable_instance_set(_obj,_names[i],data[$ _names[i]]);
+				break;
+		}
+	}
+}
+
+function scrMMOGetData(serverID,type,data){
+	if !is_string(serverID) serverID=string(serverID);
+	if !variable_struct_exists(global.MMO_Players,serverID) {
+		global.MMO_Players[$ serverID]={
+			obj: instance_create_depth(x,y,0,global.MMO_OtherPlayerObject),
+			ind: serverID,
+		}
+		global.MMO_Players[$ serverID].obj.serverID=serverID;
+	}
+	var _obj=global.MMO_Players[$ serverID].obj;
+	switch (type){
+		case clientNet.pos:
+			if data[2]{
+				_obj.x=data[0];
+				_obj.y=data[1];
+			}
+			_obj.target_x=data[0];
+			_obj.target_y=data[1];
+			break;
+		case clientNet.myRoom:
+			_obj.myRoom=asset_get_index(data);
+			break;
+		case clientNet.outfit:
+			_obj.outfit=data;
+			break;
+		case clientNet.name:
+			_obj.name=data;
+			_obj.nameWidth=string_width(data) - (string_width(data) mod 2);
+			break;
+		default: break;
+	}
+}
+
+function scrMMOJoinGame(){
+	if !instance_exists(global.MMO_PlayerObject) {
+		var _names=variable_struct_get_names(global.MMO_Players);
+		for (var i=0;i<array_length(_names);i++){
+			if global.MMO_Players[$ _names[i]].ind==global.MMO_ID{
+				global.MMO_Players[$ _names[i]].obj=instance_create_depth(192,192,0,global.MMO_PlayerObject);
+				break;
+			}
+		}
+	}
+	room_goto(rStart);
 }
