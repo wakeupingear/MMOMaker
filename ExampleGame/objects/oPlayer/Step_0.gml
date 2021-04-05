@@ -1,4 +1,4 @@
-if mouse_check_button(mb_left){
+if mouse_check_button(mb_left){ //Target the mouse
 	target_x=mouse_x;
 	target_y=mouse_y;
 }

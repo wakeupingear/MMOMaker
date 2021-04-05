@@ -1,3 +1,3 @@
 ///@description Animation
 event_inherited(); //Animation
-visible=true;
+visible=true; //Player should always be visible
