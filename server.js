@@ -249,6 +249,16 @@ function processPacket(socket, data, serverSocket) { //Code to process packet da
 				break;
 			}
 
+			case clusterNet.leave: { //Player disconnecting
+                if (!isWS) socket.destroy();
+                else socket.close();
+
+				if (unifiedCluster) { //Forward to the cluster if nodes are acting as a unified instance
+					writeToSocket(serverSocket,data);
+				}
+                break;
+            }
+
 			default: { forwardPlayerData(data, socket, 2 + _offset, serverSocket, _end); }
 		}
 		_offset = _end;
@@ -293,7 +303,7 @@ if (ipToConnect != "-1") {
 					nodes = JSON.parse(readBufString(data, 1, _len));
 					break;
 				}
-				
+
 				default: { processPacket(socket, data, -1); } //Data coming from another node in a cluster
 			}
 		});

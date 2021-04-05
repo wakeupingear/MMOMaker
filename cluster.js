@@ -134,7 +134,7 @@ function serverCode(socket, isWS, addr) {
                 sendPlayerQueuePos(socket, queue.length/2) //Send place in queue to player
                 break;
             }
-            case clusterNet.leave: {
+            case serverNet.leave: {
                 if (!isWS) socket.destroy();
                 else socket.close();
                 break;

@@ -69,23 +69,18 @@ function scrMMOSetup(){ //Setup script - run FIRST before using any other functi
 	scrMMOLoad(); //Load the file
 }
 
-function scrMMOCreateSocket(){ //Create a socket based on platform
-	if (os_browser!=browser_not_a_browser){ //Running in a browser requries WebSockets
-		global.MMO_isWS=true;
-		global.MMO_Socket=network_create_socket(network_socket_ws);
-	}
-	else{ //Other platforms can use TCP
-		global.MMO_isWS=false;
-		global.MMO_Socket=network_create_socket(network_socket_tcp);
-		network_set_timeout(global.MMO_Socket,4000,4000); //Timeout unavailable on HTML
-	}
-}
-
 function scrMMOConnect(ipOPTIONAL,portOPTIONAL){ //Connect to a server
 	if is_undefined(ipOPTIONAL) ipOPTIONAL=global.MMO_IP;
 	if is_undefined(portOPTIONAL) portOPTIONAL=global.MMO_Port;
 	scrMMOCreateSocket(); //Force a socket reset before connecting to a new server
 	network_connect_raw_async(global.MMO_Socket,ipOPTIONAL,portOPTIONAL);
+}
+
+function scrMMOJoinGame(){ //Script that runs when a you have connected to a game
+	if !instance_exists(global.MMO_PlayerObject) { //Create a controllable player object
+		global.MMO_Players[$ global.MMO_ID].obj=instance_create_depth(192,192,0,global.MMO_PlayerObject);
+	}
+	room_goto(rStart); //Load the starting room
 }
 
 function scrMMOSave(){ //Save MMO and player data
@@ -202,10 +197,9 @@ function scrMMOGetPacket(network_map){ //Process a packet - put this in an 'Asyn
 	}
 }
 
-function scrMMODisconnect(isCluster,connectAgain){ //Send a disconnect request (network_destroy doesn't work on every platform)
+function scrMMODisconnect(connectAgain){ //Send a disconnect request (network_destroy doesn't work on every platform)
 	buffer_seek(global.MMO_Buf,buffer_seek_start,2);
-	if !isCluster buffer_write(global.MMO_Buf,buffer_u8,serverNet.leave);
-	else buffer_write(global.MMO_Buf,buffer_u8,clusterNet.leave);
+	buffer_write(global.MMO_Buf,buffer_u8,serverNet.leave);
 	scrMMOSendPacketLen(global.MMO_Buf);
 	
 	show_debug_message("Disconnected from Server");
@@ -217,7 +211,7 @@ function scrMMODisconnect(isCluster,connectAgain){ //Send a disconnect request (
 }
 
 function scrMMOServerBrowser(){ //Process server browser when connecting to a cluster
-	var _serverInd=-1;
+	var _serverInd=-2;
 	switch (global.MMO_ServerBrowserType){
 		case 0: //Connect to the least full server
 			var _minPlayers=global.MMO_ServerBrowser.cap; //Max capacity is stored at the key 'cap' in the struct
@@ -242,6 +236,9 @@ function scrMMOServerBrowser(){ //Process server browser when connecting to a cl
 		default: break;
 	}
 
+	if _serverInd==-2{ //Do nothing
+		//Write code here for a server browser!
+	}
 	if _serverInd==-1{ //All servers are at max capacity
 		show_debug_message("Servers are full!");
 		buffer_seek(global.MMO_Buf,buffer_seek_start,0); //Join the lobby queue
@@ -253,26 +250,6 @@ function scrMMOServerBrowser(){ //Process server browser when connecting to a cl
 		global.MMO_Port=int64(global.MMO_ServerBrowser[$ _serverInd].p)+global.MMO_isWS;
 		scrMMODisconnect(true,true); //Disconnect and connect to the new ip and port (since)
 	}
-}
-
-function scrMMOSendPacket(buffer){ //Send the specified buffer to the currently connected server
-	network_send_raw(global.MMO_Socket,buffer,buffer_tell(buffer));
-}
-
-//GMS bunches outbound packets together if sent at similar times
-//This adds the packet length in bytes to the front of the packet as a 16 bit Integer (in front of the packet header)
-//That's why some code in the other MMO scripts use:
-//	buffer_seek(global.MMO_Buf,buffer_seek_start,2) 
-//	instead of 
-//	buffer_seek(global.MMO_Buf,buffer_seek_start,0)
-
-//Server.js reads this packet length and, after processing the packet, skips past it to check for more packets, avoiding server-side packet loss
-//This is only necessary for nodes, not a cluster, because it only becomes a problem for player data that can be sent multiple times a frame
-function scrMMOSendPacketLen(buffer){
-	var _len=buffer_tell(buffer); //Save the length of the buffer
-	buffer_seek(buffer,buffer_seek_start,0); //Move back to the front
-	buffer_write(buffer,buffer_u16,_len); //Write the buffer length
-	network_send_raw(global.MMO_Socket,buffer,_len); //Send the packet with the original length
 }
 
 function scrMMOSendPosition(x,y,teleport){ //Send a position packet (teleport shows that the player snaps to a position regardless of movement type)
@@ -309,6 +286,38 @@ function scrMMOSendName(name){ //Send a name
 	scrMMOSendPacketLen(global.MMO_Buf);
 }
 
+function scrMMOGetData(serverID,type,data){ //process
+	if !is_string(serverID) serverID=string(serverID);
+	if !variable_struct_exists(global.MMO_Players,serverID) { //Check that this player exists in the player struct
+		global.MMO_Players[$ serverID]={
+			obj: instance_create_depth(x,y,0,global.MMO_OtherPlayerObject),
+			ind: serverID,
+		}
+		global.MMO_Players[$ serverID].obj.serverID=serverID;
+	}
+	var _obj=global.MMO_Players[$ serverID].obj;
+	switch (type){
+		case clientNet.pos:
+			if data[2]{ //Teleport moves the player to that point instead of just setting target_x
+				_obj.x=data[0];
+				_obj.y=data[1];
+			}
+			_obj.target_x=data[0];
+			_obj.target_y=data[1];
+			break;
+		case clientNet.myRoom:
+			_obj.myRoom=asset_get_index(data);
+			break;
+		case clientNet.outfit:
+			_obj.outfit=data;
+			break;
+		case clientNet.name:
+			_obj.name=data;
+			break;
+		default: break;
+	}
+}
+
 function scrMMOCreateOtherPlayer(serverID,data){ //Create another player object from a struct
 	if !is_string(serverID) serverID=string(serverID);
 	if !variable_struct_exists(global.MMO_Players,serverID) { //Add the player to the player struct 
@@ -342,41 +351,37 @@ function scrMMOCreateOtherPlayer(serverID,data){ //Create another player object 
 	}
 }
 
-function scrMMOGetData(serverID,type,data){ //process
-	if !is_string(serverID) serverID=string(serverID);
-	if !variable_struct_exists(global.MMO_Players,serverID) { //Check that this player exists in the player struct
-		global.MMO_Players[$ serverID]={
-			obj: instance_create_depth(x,y,0,global.MMO_OtherPlayerObject),
-			ind: serverID,
-		}
-		global.MMO_Players[$ serverID].obj.serverID=serverID;
+
+//The following scripts are mostly used as helper functions for the ones above, so you will not probably need to use them
+
+function scrMMOCreateSocket(){ //Create a socket based on platform
+	if (os_browser!=browser_not_a_browser){ //Running in a browser requries WebSockets
+		global.MMO_isWS=true;
+		global.MMO_Socket=network_create_socket(network_socket_ws);
 	}
-	var _obj=global.MMO_Players[$ serverID].obj;
-	switch (type){
-		case clientNet.pos:
-			if data[2]{ //Teleport moves the player to that point instead of just setting target_x
-				_obj.x=data[0];
-				_obj.y=data[1];
-			}
-			_obj.target_x=data[0];
-			_obj.target_y=data[1];
-			break;
-		case clientNet.myRoom:
-			_obj.myRoom=asset_get_index(data);
-			break;
-		case clientNet.outfit:
-			_obj.outfit=data;
-			break;
-		case clientNet.name:
-			_obj.name=data;
-			break;
-		default: break;
+	else{ //Other platforms can use TCP
+		global.MMO_isWS=false;
+		global.MMO_Socket=network_create_socket(network_socket_tcp);
+		network_set_timeout(global.MMO_Socket,4000,4000); //Timeout unavailable on HTML
 	}
 }
 
-function scrMMOJoinGame(){ //Script that runs when a you have connected to a game
-	if !instance_exists(global.MMO_PlayerObject) { //Create a controllable player object
-		global.MMO_Players[$ global.MMO_ID].obj=instance_create_depth(192,192,0,global.MMO_PlayerObject);
-	}
-	room_goto(rStart); //Load the starting room
+function scrMMOSendPacket(buffer){ //Send the specified buffer to the currently connected server
+	network_send_raw(global.MMO_Socket,buffer,buffer_tell(buffer));
+}
+
+//GMS bunches outbound packets together if sent at similar times
+//This adds the packet length in bytes to the front of the packet as a 16 bit Integer (in front of the packet header)
+//That's why some code in the other MMO scripts use:
+//	buffer_seek(global.MMO_Buf,buffer_seek_start,2) 
+//	instead of 
+//	buffer_seek(global.MMO_Buf,buffer_seek_start,0)
+
+//Server.js reads this packet length and, after processing the packet, skips past it to check for more packets, avoiding server-side packet loss
+//This is only necessary for nodes, not a cluster, because it only becomes a problem for player data that can be sent multiple times a frame
+function scrMMOSendPacketLen(buffer){
+	var _len=buffer_tell(buffer); //Save the length of the buffer
+	buffer_seek(buffer,buffer_seek_start,0); //Move back to the front
+	buffer_write(buffer,buffer_u16,_len); //Write the buffer length
+	network_send_raw(global.MMO_Socket,buffer,_len); //Send the packet with the original length
 }

@@ -26,6 +26,42 @@ To use MMOEngine with an existing GMS project, add the functions inside `MMOScri
 
 `scrMMOGetPacket(network_map)`: Recieves and processes all network packets. This needs to be placed in an `Async: Networking` event, with `async_load` being passed for the argument `network_map`.
 
+`scrMMODisconnect(connectAgain)`: Disconnect from a server. If `connectAgain` is true, a new connection will be started with the server specified in `global.MMO_IP` and `global.MMO_Port`.
+
+`scrMMOServerBrowser()`: Process a struct of all servers in a cluster. Depending on the value of `global.MMO_ServerBrowserType`, this will do different things automatically:
+- 0 (default): Connect to the node with the fewest players
+- 1: Connect to the node with the most players
+- Anything else: Do nothing. Since this struct is saved in global.MMO_ServerBrowser, you could add new cases, like one that lets the player choose a node to connect to from a GUI.
+
+An example struct looks like this:
+
+```bash
+{
+   cap: 32, //Max capacity
+   0: { //Server ID
+      ip: 123.456.78.90, //IP
+      p: 63456, //Port
+      c: 10 //Number of players
+   },
+   1: {
+      ip: 98.765.43.21,
+      p: 63456,
+      c: 20
+   }
+}
+```
+
+`scrMMOSendPosition(x, y, teleport)`: Send your coordinates to other players. `teleport` is an extra flag that is passed along with the coordinates and can be used for a number of client-side things. For example, coordinates where `teleport` = 1 will have your character snap to that position on other players ends. If `teleport` = 0, your character will glide to that position instead.
+
+`scrMMOSendRoom(myRoom)`, `scrMMOSendOutfit(outfit)`, `scrMMOSendName(name)`: Send the respective property to the other players. You can add a new property with three easy steps:
+1. Add that property to the `clientNet` enum of `MMOScripts.gml`, `server.js`, and `cluster.js`.
+2. Copy and paste one of these functions, changing the names to your new property/enum name.
+3. Add new cases for this data in the following function:
+
+`scrMMOGetData(serverID, type, data)`, `scrMMOCreateOtherPlayer(serverID, data)`: Two functions to process another player's data and create a player from a struct of their data, respectively. These both work similarly, and you can add new data properties by adding new cases in their two `switch` statements.
+
+There are a few more functions included, but they are all helper functions that you shouldn't need to use unless you are making substantial additions to this code. See the comments for info on how these work. 
+
 ## Server Installation
 
 Server hosting requires a [NodeJS](https://nodejs.org/en/download/) installation and the following [npm](https://www.npmjs.com/get-npm) packages: 
@@ -48,7 +84,7 @@ To run the server locally, run the following command in a Terminal:
 
 `node server.js`
 
-WS clients (HTML5) can access this server on port `wsPort` (63456 by default). TCP clients (other platforms) can access the server on port `TCPPort` (63457 by default). If you want players on different networks to be able to join, you must [Port Forward](https://www.noip.com/support/knowledgebase/general-port-forwarding-guide/) those two ports. 
+TCP clients (non-HTML) can access the server on port `tcpPort` (63456 by default). WS clients use the next port up (if `tcpPort` is 63456, WS will connect to 63457) If you want players on different networks to be able to join, you must [Port Forward](https://www.noip.com/support/knowledgebase/general-port-forwarding-guide/) those two ports. 
 
 For a more long term hosting solution, you can upload this file to a NodeJS compatible server host. [AWS Elastic Beanstalk](https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/create_deploy_nodejs.html) is a great option that has worked well for this framework, but some equally viable (and much less complicated) options include [Google Cloud](https://cloud.google.com/nodejs), [A2 Hosting](Cloud.Google.com), and [Azure](https://azure.microsoft.com/en-us/develop/nodejs/).
 
@@ -64,7 +100,9 @@ A single `server.js` Server can be added to a cluster by setting its `ipToConnec
 
 A sample project is included in the `ExampleGame` folder.
 
-For more fleshed out examples, check out some of the projects on [my website](http://willfarhat.com).
+An early version of this framework was used in [Tiny Headed Game](thkgame.com), a free to play MMO for HTML. The server code is less efficient and uses a different system for sending buffers, but the underlying code base is similar to MMOEngine. This project is deployed on two AWS Elastic Beanstalk accounts, one for the Cluster and one for the Nodes.
+
+For more examples of usage, check out some of the projects on [my website](http://willfarhat.com).
 
 ## Contributing
 New contributions are welcome! However, before opening any pull requests, please open an Issue so that the proposed changes can be discussed. Since this framework depends on a lot of very specific buffers and package orders, even a small change may have significant effect on the whole framework.
