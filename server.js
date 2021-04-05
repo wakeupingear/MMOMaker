@@ -277,6 +277,7 @@ if (ipToConnect != "-1") {
 					let _data = JSON.parse(readBufString(data, 1, _len));
 					break;
 				}
+
 				case clusterNet.type: {
 					if (data.readUInt8(1) == 1) unifiedCluster = true; //Update the cluster mode
 
@@ -287,10 +288,12 @@ if (ipToConnect != "-1") {
 					writeToSocket(serverSocket, buf);
 					break;
 				}
+
 				case clusterNet.serverData: {
 					nodes = JSON.parse(readBufString(data, 1, _len));
 					break;
 				}
+				
 				default: { processPacket(socket, data, -1); } //Data coming from another node in a cluster
 			}
 		});
