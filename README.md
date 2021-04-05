@@ -1,6 +1,6 @@
-# MMOEngine
+# MMOM
 
-MMOEngine is a framework for implementing cross-platform multiplayer in Gamemaker Studio 2.3
+MMOMaker is a framework for implementing cross-platform multiplayer in Gamemaker Studio 2.3
 
 The framework has 3 main components:
 
@@ -16,7 +16,7 @@ The framework supports the TCP and WS protocols simultaneously, allowing for pla
 
 ## GMS Project Usage
 
-To use MMOEngine with an existing GMS project, add the functions inside `MMOScripts.gml` 
+To use MMOMaker with an existing GMS project, add the functions inside `MMOScripts.gml` 
 
 `scrMMOSetup()`: Initialize variables, determine networking protocol, and set up networking elements. This only needs to be run once before any connections are made.
 
@@ -102,7 +102,7 @@ A single `server.js` Server can be added to a cluster by setting its `ipToConnec
 
 A sample project is included in the `ExampleGame` folder.
 
-An early version of this framework was used in [Tiny Headed Game](thkgame.com), a free to play MMO for HTML. The server code is less efficient and uses a different system for sending buffers, but the underlying code base is similar to MMOEngine. This project is deployed on two AWS Elastic Beanstalk accounts, one for the Cluster and one for the Nodes.
+An early version of this framework was used in [Tiny Headed Game](thkgame.com), a free to play MMO for HTML. The server code is less efficient and uses a different system for sending buffers, but the underlying code base is similar to MMOMaker. This project is deployed on two AWS Elastic Beanstalk accounts, one for the Cluster and one for the Nodes.
 
 For more examples of usage, check out some of the projects on [my website](http://willfarhat.com).
 
