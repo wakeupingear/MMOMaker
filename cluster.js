@@ -8,7 +8,9 @@ const serverNet = Object.freeze( //Enum for server-to-client packets
         "outfit": 6,
         "name": 7,
         "leave": 8,
-		"playerObj": 9
+		"playerObj": 9,
+
+        "heartbeat": 10
     });
 
 const clientNet = Object.freeze( //Enum for client-to-server packets
@@ -23,7 +25,9 @@ const clientNet = Object.freeze( //Enum for client-to-server packets
         "message": 25,
         "email": 26,
         "upload": 27,
-        "miscData": 28
+        "miscData": 28,
+
+		"heartbeat": 29
     });
 
 const clusterNet = Object.freeze( //Enum for cluster packets
@@ -84,6 +88,7 @@ function serverCode(socket, isWS, addr) {
                 nodes[socket.id].count++; //Increase the count (decreasing happens in serverNet.leave)
                 break;
             }
+            
             case serverNet.leave: { //Send a player leave event to the other servers
                 nodes[socket.id].count--;
                 var _id = data.readUInt16LE(3);
@@ -106,10 +111,12 @@ function serverCode(socket, isWS, addr) {
                 }
                 break;
             }
+
             case clusterNet.miscData: {
                 let _data = JSON.parse(readBufString(data, 3));
                 break;
             }
+
             case clusterNet.type: { //Identifier of what kind of client this is
                 if (data.readUInt8(1) == 0) { //Player
                     sendServerBrowser(socket);
@@ -129,16 +136,26 @@ function serverCode(socket, isWS, addr) {
                 }
                 break;
             }
+
             case clusterNet.queue: { //Player requesting place in queue
                 queue.push(socket.uid, socket); //Add the UID (removing from the queue if they disconnect) and the socket (sending updates)
                 sendPlayerQueuePos(socket, queue.length/2) //Send place in queue to player
                 break;
             }
+
             case serverNet.leave: {
                 if (!isWS) socket.destroy();
                 else socket.close();
                 break;
             }
+
+            case clientNet.heartbeat: { //Recieving a heartbeat
+				buf.fill(0);
+				buf.writeUInt8(serverNet.heartbeat, 0);
+				writeToSocket(socket, buf);
+				break;
+			}
+
             default: {
                 if (unifiedCluster) serverList.forEach(server => { //Pass data to other server nodes
                     if (server.uid != socket.uid) writeToSocket(server.sock, data);

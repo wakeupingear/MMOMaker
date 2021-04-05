@@ -14,7 +14,9 @@ const serverNet = Object.freeze( //Enum for server-to-client packets
 		"outfit": 6,
 		"name": 7,
 		"leave": 8,
-		"playerObj": 9
+		"playerObj": 9,
+
+		"heartbeat": 10
 	});
 
 const clientNet = Object.freeze( //Enum for client-to-server packets
@@ -29,7 +31,9 @@ const clientNet = Object.freeze( //Enum for client-to-server packets
 		"message": 25,
 		"email": 26,
 		"upload": 27,
-		"miscData": 28
+		"miscData": 28,
+
+		"heartbeat": 29
 	});
 
 const clusterNet = Object.freeze( //Enum for cluster packets
@@ -171,7 +175,7 @@ function processPacket(socket, data, serverSocket) { //Code to process packet da
 	let _offset = 0;
 	let _end = 0;
 	while (_offset < _totalLen) {
-		_end = _offset+data.readInt16LE(_offset);
+		_end = _offset + data.readInt16LE(_offset);
 		switch (data.readUInt8(2 + _offset)) { //Check possible headers
 			case clientNet.ID: {//Confirming UID
 				let _str = readBufString(data, 3 + _offset, _end); //Sanitize buffer string (remove hidden characters/GMS packet identifiers)
@@ -250,14 +254,21 @@ function processPacket(socket, data, serverSocket) { //Code to process packet da
 			}
 
 			case clusterNet.leave: { //Player disconnecting
-                if (!isWS) socket.destroy();
-                else socket.close();
+				if (!isWS) socket.destroy();
+				else socket.close();
 
 				if (unifiedCluster) { //Forward to the cluster if nodes are acting as a unified instance
-					writeToSocket(serverSocket,data);
+					writeToSocket(serverSocket, data);
 				}
-                break;
-            }
+				break;
+			}
+
+			case clientNet.heartbeat: { //Recieving a heartbeat
+				buf.fill(0);
+				buf.writeUInt8(serverNet.heartbeat, 0);
+				writeToSocket(socket, buf);
+				break;
+			}
 
 			default: { forwardPlayerData(data, socket, 2 + _offset, serverSocket, _end); }
 		}
@@ -328,7 +339,10 @@ function writeToSocket(socket, dataBuf) { //Send a buffer to a socket - necessar
 
 function forwardPlayerData(data, socket, dataOffset, serverSocket, end) {
 	let _data = -1;
-	if (data.readUInt8(dataOffset) == clientNet.pos) { //Update position
+	if (data.readUInt8(dataOffset) == clientNet.message) { //Recieve a message
+		_data = readBufString(data, 1 + dataOffset, end);
+	}
+	else if (data.readUInt8(dataOffset) == clientNet.pos) { //Update position
 		_data = [data.readInt16LE(1 + dataOffset), data.readInt16LE(3 + dataOffset), data.readUInt8(5 + dataOffset)];
 		socketToData[socket.uid].pos = _data;
 	}

@@ -26,6 +26,8 @@ To use MMOEngine with an existing GMS project, add the functions inside `MMOScri
 
 `scrMMOGetPacket(network_map)`: Recieves and processes all network packets. This needs to be placed in an `Async: Networking` event, with `async_load` being passed for the argument `network_map`.
 
+`scrMMOHeartbeat()`: Send a [heartbeat](https://en.wikipedia.org/wiki/Heartbeat_(computing)) ping to the server and set `alarm[12]` of the object that runs this code to go off in 5 seconds. The alarm will be stopped if the server pings back within that time. This can be used to periodically check that the player is still connected to a network.
+
 `scrMMODisconnect(connectAgain)`: Disconnect from a server. If `connectAgain` is true, a new connection will be started with the server specified in `global.MMO_IP` and `global.MMO_Port`.
 
 `scrMMOServerBrowser()`: Process a struct of all servers in a cluster. Depending on the value of `global.MMO_ServerBrowserType`, this will do different things automatically:
@@ -53,7 +55,7 @@ An example struct looks like this:
 
 `scrMMOSendPosition(x, y, teleport)`: Send your coordinates to other players. `teleport` is an extra flag that is passed along with the coordinates and can be used for a number of client-side things. For example, coordinates where `teleport` = 1 will have your character snap to that position on other players ends. If `teleport` = 0, your character will glide to that position instead.
 
-`scrMMOSendRoom(myRoom)`, `scrMMOSendOutfit(outfit)`, `scrMMOSendName(name)`: Send the respective property to the other players. You can add a new property with three easy steps:
+`scrMMOSendRoom(myRoom)`, `scrMMOSendOutfit(outfit)`, `scrMMOSendName(name)`, `scrMMOSendMessage(message)`: Send the respective property to the other players. You can add a new property with three easy steps:
 1. Add that property to the `clientNet` enum of `MMOScripts.gml`, `server.js`, and `cluster.js`.
 2. Copy and paste one of these functions, changing the names to your new property/enum name.
 3. Add new cases for this data in the following function:

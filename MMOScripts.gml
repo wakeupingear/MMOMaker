@@ -14,7 +14,9 @@ function scrMMOSetup(){ //Setup script - run FIRST before using any other functi
 		outfit= 6,
 		name= 7,
 		leave= 8,
-		playerObj= 9
+		playerObj= 9,
+
+        heartbeat= 10
 	}
 
 	enum clientNet //Enum for client-to-server packets
@@ -29,7 +31,9 @@ function scrMMOSetup(){ //Setup script - run FIRST before using any other functi
 		message= 25,
 		email= 26,
 		upload= 27,
-		miscData= 28
+		miscData= 28,
+
+		heartbeat= 29
 	}
 
 	enum clusterNet //Enum for cluster packets
@@ -54,6 +58,7 @@ function scrMMOSetup(){ //Setup script - run FIRST before using any other functi
 	global.MMO_ID=-1; //Temporary ID while in a server
 
 	global.MMO_Players={}; //Struct of all players
+	global.MMO_Messages=ds_list_create(); //List of messages sent for the in game chat
 	global.MMO_PlayerObject=oPlayer; //GMS object that represents you
 	global.MMO_OtherPlayerObject=oOtherPlayer; //GMS object for other player
 	global.MMO_ServerBrowser={}; //Struct for all servers within a cluster 
@@ -172,6 +177,15 @@ function scrMMOGetPacket(network_map){ //Process a packet - put this in an 'Asyn
 							variable_struct_remove(global.MMO_Players,_id);
 							break;
 
+						case serverNet.heartbeat:
+							alarm[12]=-1; //Reset the heartbeat alarm
+							break;
+
+						case clientNet.message: //Recieve a message
+							var _msg=buffer_read(buffer, buffer_string); //This can be changed to recieve a JSON to include info like sender name
+							ds_list_add(messages,_msg);
+							break;
+
 						case clientNet.pos: //Player sends a new position
 							var _id=string(buffer_read(buffer,buffer_u16));
 							var _x=buffer_read(buffer,buffer_s16);
@@ -195,6 +209,14 @@ function scrMMOGetPacket(network_map){ //Process a packet - put this in an 'Asyn
 			buffer_seek(buffer,buffer_seek_start,min(_size,_bufferInd*512));
 		}
 	}
+}
+
+function scrMMOHeartbeat(){ //Send a "heartbeat" - confirmation that the game is still connected to the server
+	buffer_seek(global.MMO_Buf,buffer_seek_start,0);
+	buffer_write(global.MMO_Buf,buffer_u8,clusterNet.type);
+	scrMMOSendPacket(global.MMO_Buf);
+
+	alarm[12]=room_speed*5; //Alarm triggers in 5 seconds; it is reset if a "heartbeat" is recieved back
 }
 
 function scrMMODisconnect(connectAgain){ //Send a disconnect request (network_destroy doesn't work on every platform)
@@ -284,6 +306,13 @@ function scrMMOSendName(name){ //Send a name
 	buffer_write(global.MMO_Buf,buffer_u8,clientNet.name);
 	buffer_write(global.MMO_Buf,buffer_string,name);
 	scrMMOSendPacketLen(global.MMO_Buf);
+}
+
+function scrMMOSendMessage(message){ //Send a message
+	buffer_seek(global.MMO_BufLarge,buffer_seek_start,2);
+	buffer_write(global.MMO_BufLarge,buffer_u8,clientNet.message);
+	buffer_write(global.MMO_BufLarge,buffer_string,message);  //This can be changed to send a JSON to include info like sender name
+	scrMMOSendPacketLen(global.MMO_BufLarge);
 }
 
 function scrMMOGetData(serverID,type,data){ //process
