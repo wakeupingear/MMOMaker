@@ -1,4 +1,4 @@
-# MMOManager
+# MMOMaker
 
 MMOMaker is a framework for implementing cross-platform multiplayer in Gamemaker Studio 2.3
 
